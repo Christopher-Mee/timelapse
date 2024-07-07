@@ -39,7 +39,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
      * Under 'User Variables', double click path.
      * Select browse, go to your choosen location, then select the ffmpeg folder, then the bin folder.
      * Select ok on each window until all are closed.
-     * Open cmd and type 'FFmpeg' to test.
+     * Test install; open cmd, enter 'FFmpeg'.
       
 * ‎**4) Install python**
   * Install [python](https://www.python.org/downloads/) version 3.10+
