@@ -53,6 +53,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
     * python -m venv venv  
     * python -m pip install --upgrade pip  
     * pip install -r requirements.txt --use-pep517
+  * Move font files to your desktop. 
  
  * **6) Run python script**
    * Run
