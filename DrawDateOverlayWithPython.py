@@ -81,8 +81,8 @@ SCRIPT_NAME = os.path.basename(__file__)
 USERNAME = os.getlogin()
 
 # == FONT =====================================================================
-HELVETICA = "C:/Users/" + USERNAME + "/Desktop/New Font/Helvetica___.ttf"
-HELVETICA_BOLD = "C:/Users/" + USERNAME + "/Desktop/New Font/HelveticaBd.ttf"
+HELVETICA = "C:/Users/" + USERNAME + "/Desktop/Helvetica___.ttf"
+HELVETICA_BOLD = "C:/Users/" + USERNAME + "/Desktop/HelveticaBd.ttf"
 
 # == SETTINGS =================================================================
 # date, ampm str
