@@ -26,7 +26,8 @@ Generate a video to view your raspberry pi timelapse.
   * The output will be stored in the new dir you created to store the scirpt.
   * Use a flash drive, SFTP, or upload to the cloud.
  * Step 3) Install FFmpeg  
-   * [Download the latest build](https://www.gyan.dev/ffmpeg/builds/)
+   * [Download the latest release](https://www.gyan.dev/ffmpeg/builds/)
+     * Located under 'release builds'
    * Move to a location of your choosing.
      * ex: C:\bin
    * Add to PATH
