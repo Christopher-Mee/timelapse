@@ -45,7 +45,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
   * Install [python](https://www.python.org/downloads/) version 3.10+
   * Test install; open cmd, enter 'python'.
     
-* **5) Install script**  
+* **5) Install python script**  
   * Select an install location.
   * Download/clone repo into selected folder.
   * Inside the folder, hold shift and left click, then select 'open cmd/powershell' from the context menu.
@@ -54,8 +54,9 @@ The following is a hyper detailed installation guide. Do not be intimidated.
     * python -m pip install --upgrade pip  
     * pip install -r requirements.txt --use-pep517
  
- * **6) Run script**
+ * **6) Run python script**
    * Run
-     * DrawDateOverlayWithPython.py 'Folder path containing timelapse'
+     * python DrawDateOverlayWithPython.py 'Folder path containing timelapse'
    * Tip
      * Shift click folder and select copy path.
+     * To run the script again you will need to copy the python.exe path from the venv folder.
