@@ -23,7 +23,7 @@ Generate a video to view your raspberry pi timelapse.
       * -vf vertical flip
     * The timelapse will take one photo per minute.
 * Step 2) **Transfer your timelapse photos to your windows pc.**
-  * The output will be stored in the new dir you created to store the scirpt.
+  * Your timelpase output is stored in the scirpt dir, created in step 1.
   * Use a flash drive, SFTP, or upload to the cloud.
  * Step 3) **Install FFmpeg**  
    * [Download the latest release](https://www.gyan.dev/ffmpeg/builds/)
