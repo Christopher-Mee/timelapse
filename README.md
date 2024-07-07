@@ -2,7 +2,7 @@
 
 Generate a video to view your raspberry pi timelapse.
 
-* Step 1) Obtain your timelapse photos  
+* Step 1) **Obtain your timelapse photos**  
   * Install your raspberry pi camera. (I will not include a guide.)  
   * Install camera.sh script to your raspberry pi.  
     * Transfer or download the script to your pi.
@@ -22,10 +22,10 @@ Generate a video to view your raspberry pi timelapse.
       * -hf horizontal flip
       * -vf vertical flip
     * The timelapse will take one photo per minute.
-* Step 2) Transfer your timelapse photos to your windows pc.
+* Step 2) **Transfer your timelapse photos to your windows pc.**
   * The output will be stored in the new dir you created to store the scirpt.
   * Use a flash drive, SFTP, or upload to the cloud.
- * Step 3) Install FFmpeg  
+ * Step 3) **Install FFmpeg**  
    * [Download the latest release](https://www.gyan.dev/ffmpeg/builds/)
      * Located under 'release builds'
    * Move to a location of your choosing.
