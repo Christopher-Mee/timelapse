@@ -42,7 +42,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
      * Open cmd and type 'FFmpeg' to test.
       
 * ‎**4) Install python script on your pc**  
-  * install python version 3.10+
+  * install [python](https://www.python.org/downloads/) version 3.10+
   * select an install location
   * Open install location, hold shift and left click, select open cmd/powershell
   * clone repo  
