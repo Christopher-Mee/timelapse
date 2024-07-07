@@ -2,6 +2,7 @@
 
 Generate a video to view your raspberry pi timelapse.
 
+The following is a hyper detailed installation guide. Do not be intimidated.
 * Step 1) **Obtain your timelapse photos**  
   * Install your raspberry pi camera. (I will not include a guide.)  
   * Install camera.sh script to your raspberry pi.  
