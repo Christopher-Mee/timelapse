@@ -21,7 +21,6 @@ Generate a video to view your raspberry pi timelapse.
       * ex. raspistill -hf -vf -o /home/pi/timelapse/$DATE.jpg
       * -hf horizontal flip
       * -vf vertical flip
-    * The timelapse will take one photo per minute.
 * Step 2) **Transfer your timelapse photos to your windows pc.**
   * Your timelpase output is stored in the scirpt dir, created in step 1.
   * Use a flash drive, SFTP, or upload to the cloud.
