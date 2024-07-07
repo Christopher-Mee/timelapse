@@ -35,6 +35,6 @@ Generate a video to view your raspberry pi timelapse.
      * Select the first result.
      * Select Environment Variables (located at the bottom of the new window).
      * Under 'User Variables', double click path.
-     * Select browse, go to your choosen location, then select the bin folder inside.
+     * Select browse, go to your choosen location, then select ffmpeg, then the bin folder inside.
      * Select ok on each window until all are closed.
      * Open cmd and type FFmpeg to test.
