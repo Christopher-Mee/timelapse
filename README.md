@@ -41,4 +41,4 @@ The following is a hyper detailed installation guide. Do not be intimidated.
      * Select ok on each window until all are closed.
      * Open cmd and type 'FFmpeg' to test.
       
-* ‎4) **Install python script**  
+* ‎4) **Install python script on your pc**  
