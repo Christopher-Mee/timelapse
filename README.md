@@ -43,7 +43,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
       
 * ‎**4) Install python**
   * Install [python](https://www.python.org/downloads/) version 3.10+
-  * Test install, open cmd and enter 'python'.
+  * Test install; open cmd, enter 'python'.
     
 * **5) Install script**  
   * select an install location
