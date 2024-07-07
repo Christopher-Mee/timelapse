@@ -27,7 +27,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
   * Your timelpase output is stored in the scirpt dir, created in step 1.
   * Use a flash drive, SFTP, or upload to the cloud.
       
-* ‎**3) Install FFmpeg on your pc**  
+* ‎**3) Install FFmpeg**  
    * [Download the latest release](https://www.gyan.dev/ffmpeg/builds/)
      * Located under 'release builds'
    * Move to a location of your choosing.
@@ -41,8 +41,11 @@ The following is a hyper detailed installation guide. Do not be intimidated.
      * Select ok on each window until all are closed.
      * Open cmd and type 'FFmpeg' to test.
       
-* ‎**4) Install python script on your pc**  
-  * install [python](https://www.python.org/downloads/) version 3.10+
+* ‎**4) Install python**
+  * Install [python](https://www.python.org/downloads/) version 3.10+
+  * Test install, open cmd and enter 'python'.
+    
+* **5) Install script**  
   * select an install location
   * Open install location, hold shift and left click, select open cmd/powershell
   * clone repo  
