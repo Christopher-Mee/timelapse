@@ -53,3 +53,9 @@ The following is a hyper detailed installation guide. Do not be intimidated.
     * python -m venv venv  
     * python -m pip install --upgrade pip  
     * pip install -r requirements.txt --use-pep517
+ 
+ * **6) Run script**
+   * Run
+     * DrawDateOverlayWithPython.py 'Folder path containing timelapse'
+   * Tip
+     * Shift click folder and select copy path.
