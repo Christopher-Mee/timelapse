@@ -49,6 +49,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
   * Select an install location.
   * Download/clone repo into selected folder.
   * Inside the folder, hold shift and left click, then select 'open cmd/powershell' from the context menu.
-  * python -m venv venv  
-  * python -m pip install --upgrade pip  
-  * pip install -r requirements.txt --use-pep517
+  * Run:
+    * python -m venv venv  
+    * python -m pip install --upgrade pip  
+    * pip install -r requirements.txt --use-pep517
