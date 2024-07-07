@@ -5,10 +5,14 @@
   * Install camera.sh script to your raspberry pi.  
     * Transfer or download the script to your pi.
     * Create a new dir /home/pi/timelapse/ and store the script inside.  
-    * **Open Terminal:** Ctrl + Alt + T  
-    * **Run:** sudo crontab -e  
-    * **Add:** * * * * * sh /home/pi/timelapse/camera.sh 2>&1  
-    * **Exit:** Ctrl + x , then Y
+    * Open Terminal:  
+      Ctrl + Alt + T  
+    * Run:  
+      sudo crontab -e  
+    * Add:  
+      \* \* \* \* \* sh /home/pi/timelapse/camera.sh 2>&1  
+    * Exit:  
+      Ctrl + x , then Y
   * Tips:  
     * To disable your timelapse, delete the line from crontab or add a # before the line.
     * If you need to flip the camera, modify the camera.sh script.
