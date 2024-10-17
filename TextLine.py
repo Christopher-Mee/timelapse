@@ -1,146 +1,260 @@
 """
 Christopher Mee
 2024-07-01
-Object representing a line of text, positioned in relation to an image.
+Line of text, positioned in relation to an image.
 """
 
-import sys
-import os
-from functools import lru_cache
+from __future__ import annotations  # For forward references in type hints
 
-from PIL import ImageFont
+import math
+import os
+import re
+import subprocess  # FFmpeg
+import sys
+from enum import Enum
+from functools import lru_cache
+from typing import cast, Callable
+
+from PIL import Image, ImageFile, ImageFont, ImageDraw
+from PIL._typing import Coords
+
+
+class RenderEngine(Enum):
+    """Render engine used to draw TextLines."""
+
+    PILLOW = 0
+    FFMPEG = 1
+
+
+class Resize(Enum):
+    """Resize mode.
+
+    See also:
+        `TextLine.resize()`
+    """
+
+    GROW = 0
+    SHRINK = 1
+
+
+class FindMetric(Enum):
+    """Search mode.
+
+    See also:
+        `searchMetric()`
+    """
+
+    LARGEST = 0
+    SMALLEST = 1
+
+
+class TextMetric(Enum):
+    """Text metric.
+
+    See also:
+        `searchMetric()`
+    """
+
+    LEFT_KERNING = 0
+    RIGHT_KERNING = 1
+    X_OFFSET = 2
+    Y_OFFSET = 3
 
 
 class TextLine:
-    """A text line to be drawn on an image."""
+    """A text line to be drawn on to an image."""
 
-    # indexes
+    # POSITION INDEXES
+    X, Y = 0, 1
 
-    # axis
-    X = 0
-    Y = 1
+    # SIZE INDEXES
+    WIDTH, HEIGHT = 0, 1
 
-    # size
-    WIDTH = 0
-    HEIGHT = 1
+    # OFFSET INDEXES
+    OFFSET_X, OFFSET_Y = 0, 1
 
-    # offset
-    X_OFFSET = 0
-    Y_OFFSET = 1
+    # KERNING INDEXES
+    KERNING_LEFT, KERNING_RIGHT = 0, 1
 
-    # bbox
-    X1 = 0
-    Y1 = 1
-    X2 = 2
-    Y2 = 3
+    # BBOX INDEXES
+    X1, Y1, X2, Y2 = 0, 1, 2, 3
 
-    # ascii subset
+    # BORDER WIDTH INDEXES
+    BORDER_TOP, BORDER_RIGHT, BORDER_BOTTOM, BORDER_LEFT = 0, 1, 2, 3
+
+    # ASCII SUBSETS
     NUMBER = list(range(48, (57 + 1)))  # 0-9
     UPPER = list(range(65, (90 + 1)))  # A-Z
     LOWER = list(range((65 + 32), (90 + 32 + 1)))  # a-z
     COMMA = [44]  # ,
     COLON = [58]  # :
 
-    # resize
-    GROW = 1
-    SHRINK = -1
+    # TAB HELPERS
+    TAB_SIZE = 2  # in SPACES
+    TAB = "\t"
+    REVERSE_TAB = "\r"
+    DELIMITERS = [TAB, REVERSE_TAB]  # Add all delimiters here
+    EMPTY = ""
+    SPACE = " "
 
-    # static helpers
+    # STATIC HELPERS
     @staticmethod
-    def getBbox(textLine):
-        """Get text bounding box for the TextLine object.\n
-        The bbox is useful for finding the size of text without the proceding and trailing kerning.
+    def getBbox(textLine: TextLine) -> tuple[int, int, int, int]:
+        """Get bounding box.\n
+        The bounding box is used to get text size without any excess whitespace.
 
         Args:
-            textLine (TextLine): A TextLine object
+            textLine (TextLine): TextLine.
 
         Returns:
-            tuple[int, int, int, int]: text bounding box
+            tuple[int, int, int, int]: Text bounding box (`X1`, `Y1`, `X2`, `Y2`).
         """
-        return textLine.getFont().getmask(textLine.getText()).getbbox()
+        bbox = textLine.getFont().getmask(textLine.getText(True)).getbbox()
+
+        tabsWidth = 0  # px
+        if TextLine.TAB in textLine.getText():
+            tabsWidth = TextLine.getTabsWidth(textLine.getFont(), textLine.getText())
+
+        return (
+            bbox[TextLine.X1],
+            bbox[TextLine.Y1],
+            bbox[TextLine.X2] + tabsWidth,
+            bbox[TextLine.Y2],
+        )
 
     @staticmethod
-    def getBboxWidth(bbox):
-        """Get the width of the text bounding box
+    def getBboxWidth(bbox: tuple[int, int, int, int]) -> int:
+        """Get bounding box width.
 
         Args:
-            bbox (tuple[int, int, int, int]): text bounding box
+            bbox (tuple[int, int, int, int]): Text bounding box (`X1`, `Y1`, `X2`, `Y2`).
 
         Returns:
-            int: width of text bounding box in px
+            int: Width, in px.
         """
         return bbox[TextLine.X2] - bbox[TextLine.X1]
 
     @staticmethod
-    def getBboxHeight(bbox):
-        """Get the height of the text bounding box
+    def getBboxHeight(bbox: tuple[int, int, int, int]) -> int:
+        """Get bounding box height.
 
         Args:
-            bbox (tuple[int, int, int, int]): text bounding box
+            bbox (tuple[int, int, int, int]): Text bounding box (`X1`, `Y1`, `X2`, `Y2`).
 
         Returns:
-            int: height of text bounding box in px
+            int: Height, in px.
         """
         return bbox[TextLine.Y2] - bbox[TextLine.Y1]
 
     @staticmethod
-    def getBboxSize(bbox):
-        """Get the size of a text bounding box.
+    def getBboxSize(bbox: tuple[int, int, int, int]) -> tuple[int, int]:
+        """Get bounding box size.
 
         Args:
-            bbox (tuple[int, int, int, int]): text bounding box
+            bbox (tuple[int, int, int, int]): Text bounding box (`X1`, `Y1`, `X2`, `Y2`).
 
         Returns:
-            tuple[int, int]: (width, height) of the text bounding box in px
+            tuple[int, int]: (`WIDTH`, `HEIGHT`), in px.
         """
-
         return TextLine.getBboxWidth(bbox), TextLine.getBboxHeight(bbox)
 
     @staticmethod
-    def getDescenderMinHeight(textLine):
-        """Find the 'actual' size of the descender excluding whitespace.
+    def getDescenderMinHeight(textLine: TextLine) -> int:
+        """Get descender minimum height.\n
+        'Minimum' refers to the utilized height below the baseline, without any \n
+        excess whitespace.
 
         Args:
-            textLine (TextLine): A TextLine object.
+            textLine (TextLine): TextLine.
 
         Returns:
-            int: Descender minimum height.
+            int: Minimum height, in px.
         """
         bboxH = TextLine.getBboxHeight(TextLine.getBbox(textLine))
         txtH = textLine.getSize()[TextLine.HEIGHT]
-        offY = textLine.getOffset()[TextLine.Y_OFFSET]
+        offY = textLine.getOffset()[TextLine.OFFSET_Y]
 
         return bboxH - (txtH - offY)
 
     @staticmethod
-    def getKerningSize(textLine):
-        """Get the size of the procceding and trailing kerning for a TextLine Object
+    def getKerningWidth(textLine: TextLine) -> tuple[int, int]:
+        """Get Kerning width.
 
         Args:
-            textLine (TextLine): TextLine Object
+            textLine (TextLine): TextLine.
 
         Returns:
-            tuple[int, int]: (left, right) size of kerning in px
+            tuple[int, int]: (`KERNING_LEFT`, `KERNING_RIGHT`), in px.
         """
         bbox = TextLine.getBbox(textLine)
 
-        left = bbox[TextLine.X1]
-        right = textLine.getSize()[TextLine.WIDTH] - bbox[TextLine.X2]
+        kerningLeft = bbox[TextLine.X1]
+        kerningRight = textLine.getSize()[TextLine.WIDTH] - bbox[TextLine.X2]
 
-        return left, right
+        return kerningLeft, kerningRight
 
     @staticmethod
     @lru_cache(maxsize=None)
-    def getAsciiRange(textLine):
-        """Parse TextLine and return it's composition.
+    def getTabWidth(font: ImageFont.FreeTypeFont) -> int:
+        """Get single tab width.
+
+        See also:
+            `TextLine.TAB_SIZE`
 
         Args:
-            textLine (TextLine): TextLine object
+            font (ImageFont.FreeTypeFont): Font style (font and font point).
 
         Returns:
-            List[int, ...]: ascii composition of TextLine
+            int: Width, in px.
         """
-        text = textLine.getText()
+        (spaceWidth, _), (_, _) = font.font.getsize(TextLine.SPACE)
+        return TextLine.TAB_SIZE * spaceWidth
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def getTabsWidth(font: ImageFont.FreeTypeFont, text: str) -> int:
+        """Get total tabs widths.\n
+        NOTE: Tabs are NOT natively supported by `PIL`.
+
+        Args:
+            font (ImageFont.FreeTypeFont): Font style (font and font point).
+            text (str): Text (including delimiters).
+
+        Returns:
+            int: Total width of all tabs, in px.
+        """
+        TAB_WIDTH = TextLine.getTabWidth(font)
+        PATTERN = "{}|{}".format(TextLine.TAB, TextLine.REVERSE_TAB)
+        tabsWidthTotal = 0  # in px
+
+        split = re.split(PATTERN, text)
+        for text in split[:-1]:
+            (textW, _), (_, _) = font.font.getsize(text)
+            tabOverlap = textW % TAB_WIDTH
+            tabsWidthTotal += TAB_WIDTH - tabOverlap
+
+        return tabsWidthTotal
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def getAsciiRange(textLine: TextLine) -> list[int]:
+        """Get TextLine composition.
+
+        \nTextLine composition (includes one or more of the following ranges):
+        `NUMBER` `UPPER` `LOWER` `COMMA` `COLON`
+
+        \nThe result should be used to predict which characters a TextLine may
+        \ncontain in the future, assuming the TextLine subject remains consistent.
+
+
+
+        \nArgs:
+        \n    textLine (TextLine): TextLine.
+
+        \nReturns:
+        \n    list[int]: TextLine composition.
+        """
+        text = textLine.getText(True)
         asciiCodes = [ord(char) for char in text]
 
         lineComposition = []
@@ -160,74 +274,262 @@ class TextLine:
         return lineComposition
 
     @staticmethod
-    def getSmallestOffY(textLine, asciiRange):
-        """Get the smallest offset y, from the range of ascii characters.\n
-        This value should be used as an achor point to align text.
+    @lru_cache(maxsize=None)
+    def getExcessKerning(textLine: TextLine, kerningSide: TextMetric) -> int:
+        """Get excess kerning width.
+
+        See also:
+            `TextMetric.RIGHT_KERNING`, `TextMetric.LEFT_KERNING`
 
         Args:
-            textLine (TextLine): A TextLine Object, used to set the font and point of the characters.
-            asciiRange (List[int, ...]): Range of ascii characters to test.
-
-        Returns:
-            int: Smallest offset y.
-        """
-        offYSmallest = sys.maxsize
-
-        for char in asciiRange:
-            offY = TextLine.copyStyle(textLine, chr(char)).getOffset()[TextLine.Y]
-            if offY < offYSmallest:
-                offYSmallest = offY
-
-        return offYSmallest
-
-    @staticmethod
-    def resize(toResize, toCompare, mode):
-        """Resize a TextLine object relative to another.
-
-        Args:
-            toResize (TextLine): TextLine being resized.
-            toCompare (TextLine): TextLine being compared.
-            mode (int): Select which operation you want. (grow, shrink)
+            textLine (TextLine): TextLine to measure.
+            kerningSide (TextMetric): Left or right side kerning.
 
         Raises:
-            ValueError: Resize mode must match available options.
+            ValueError: TextMetric not supported.
+
+        Returns:
+            int: Excess kerning whitespace width.
         """
-        if TextLine.SHRINK == mode:
+        FIRST_CHAR, LAST_CHAR = 0, -1
+        excess = 0
+
+        match kerningSide:
+
+            case TextMetric.RIGHT_KERNING:
+                end = TextLine.copyStyle(textLine, textLine.getText(True)[LAST_CHAR])
+                excess = TextLine.searchMetric(
+                    end, FindMetric.SMALLEST, TextMetric.RIGHT_KERNING
+                )
+
+            case TextMetric.LEFT_KERNING:
+                start = TextLine.copyStyle(textLine, textLine.getText(True)[FIRST_CHAR])
+                excess = TextLine.searchMetric(
+                    start, FindMetric.SMALLEST, TextMetric.LEFT_KERNING
+                )
+
+            case _:  # default
+                raise ValueError(
+                    "TextMetric not supported. Use RIGHT_KERNING or LEFT_KERNING."
+                )
+
+        return excess
+
+    @staticmethod
+    def searchMetric(
+        textLine: TextLine, mode: FindMetric, attribute: TextMetric
+    ) -> int:
+        """Search TextLine composition metrics.
+
+        Note:
+            Used to create a text alignment anchor point and/or remove empty whitespace.
+
+        Args:
+            textLine (TextLine): TextLine.
+            mode (FindMetric): Search mode.
+            attribute (TextMetric): TextLine composition metric.
+
+        Returns:
+            int: Result.
+        """
+        if mode == FindMetric.SMALLEST:
+            compareOperation = -1
+            result = sys.maxsize
+        elif mode == FindMetric.LARGEST:
+            compareOperation = 1
+            result = -sys.maxsize - 1
+        else:
+            return NotImplemented
+
+        tempLine = TextLine.copyStyle(textLine, "")
+        for char in TextLine.getAsciiRange(textLine):
+            if attribute == TextMetric.X_OFFSET:
+                toCompare = tempLine.setText(chr(char)).getOffset()[TextLine.OFFSET_X]
+            elif attribute == TextMetric.Y_OFFSET:
+                toCompare = tempLine.setText(chr(char)).getOffset()[TextLine.OFFSET_Y]
+            elif attribute == TextMetric.LEFT_KERNING:
+                toCompare = TextLine.getKerningWidth(tempLine.setText(chr(char)))[
+                    TextLine.KERNING_LEFT
+                ]
+            elif attribute == TextMetric.RIGHT_KERNING:
+                toCompare = TextLine.getKerningWidth(tempLine.setText(chr(char)))[
+                    TextLine.KERNING_RIGHT
+                ]
+            else:
+                return NotImplemented
+
+            if (toCompare * compareOperation) > (result * compareOperation):
+                result = toCompare
+
+        return result
+
+    @staticmethod
+    def resize(
+        toResize: TextLine, toCompare: TextLine, mode: Resize
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Resize TextLine, relative to another.
+
+        Args:
+            toResize (TextLine): TextLine to resize.
+            toCompare (TextLine): TextLine to compare.
+            mode (Resize): Resize mode (`GROW`, `SHRINK`).
+
+        Raises:
+            ValueError: Invalid resize mode.
+
+        Returns:
+            tuple[tuple[float, float], tuple[float, float]]: Difference between original and new size, \n
+                (widthDif, HeightDif), (xOffDif, yOffDif).
+        """
+        (originalWidth, originalHeight), (originalOffX, originalOffY) = (
+            toResize.getSize(),
+            toResize.getOffset(),
+        )
+
+        if mode == Resize.SHRINK:
             while (
                 toResize.getSize()[TextLine.WIDTH] > toCompare.getSize()[TextLine.WIDTH]
             ):
                 newPoint = toResize.getFontPoint() - 1
                 toResize.setFontPoint(newPoint)
-        elif TextLine.GROW == mode:
+        elif mode == Resize.GROW:
             while (
                 toResize.getSize()[TextLine.WIDTH] < toCompare.getSize()[TextLine.WIDTH]
             ):
                 newPoint = toResize.getFontPoint() + 1
                 toResize.setFontPoint(newPoint)
         else:
-            raise ValueError("Resize mode not supported.")
+            return NotImplemented
+
+        (newWidth, newHeight), (newOffX, newOffY) = (
+            toResize.getSize(),
+            toResize.getOffset(),
+        )
+
+        return (
+            (newWidth - originalWidth, newHeight - originalHeight),
+            (newOffX - originalOffX, newOffY - originalOffY),
+        )
 
     @staticmethod
-    def delimitFFmpegPath(filepath):
-        """Modifies a filepath to work with FFmpeg.
+    def addTabAlignment(
+        textLine: TextLine, loc: int, length: int, reverse: bool = False
+    ) -> None:
+        """Add tab alignment to TextLine.
+
+        Note:
+            Location is based on pre-existing spaces in the TextLine.
+
+        See also:
+            `TextLine.TAB_SIZE`
 
         Args:
-            filepath (str): original filepath
+            textLine (TextLine): TextLine.
+            loc (int): Location (0-n) to insert alignment.
+            length (int): Length of alignment in tabs.
+        """
+        NOT_FOUND = -1  # rfind() flag
+        TAB_SIZE = TextLine.getTabWidth(textLine.getFont())
+        TAB_ALIGNMENT_SIZE = TAB_SIZE * length
+        TAB_TYPE = TextLine.TAB if not reverse else TextLine.REVERSE_TAB
+
+        split = textLine.getText().split(TextLine.SPACE, loc)
+        start = " ".join(split[0:loc])
+        end = split[loc]
+
+        lastTabIndex = start.rfind(TextLine.TAB)
+        lastRTabIndex = start.rfind(TextLine.REVERSE_TAB)
+        lastTabStopIndex = max(lastTabIndex, lastRTabIndex)
+
+        if lastTabStopIndex == NOT_FOUND:
+            textLine.setText(start)
+        else:
+            if lastTabIndex == lastTabStopIndex:
+                tabLength = len(TextLine.TAB)
+            else:
+                tabLength = len(TextLine.REVERSE_TAB)
+
+            # truncate to only text after the last tab stop
+            textLine.setText(start[lastTabStopIndex + tabLength :])
+
+        startWidth = textLine.getSize()[TextLine.WIDTH]
+        tabsToAdd = math.ceil((TAB_ALIGNMENT_SIZE - startWidth) / TAB_SIZE) * TAB_TYPE
+        textLine.setText(start + tabsToAdd + end)
+
+    @staticmethod
+    def extendTabAlignment(
+        toDraw: TextLine,
+        toCompare: TextLine,
+        toCompareWhitespace: float = 0,
+        tabGroup: int = 1,
+    ) -> float:
+        """Extend tab alignment width, relative to another.
+
+        Args:
+            toDraw (TextLine): TextLine to draw.
+            toCompare (TextLine): TextLine to compare.
+            toCompareWhitespace (float, optional): To compare's, unaccounted for extra width. Defaults to 0.
+            tabGroup (int, optional): Tab group to extend (1-n). Defaults to 1.
 
         Returns:
-            str: delimited filepath
+            float: To draw's newly added tabs width.
+        """
+        TAB_SIZE = TextLine.getTabWidth(toDraw.getFont())
+        splitter = TextLine.TAB
+        split = toDraw.getText().split(splitter)
+        tabsToAdd = math.ceil(
+            (
+                (toCompare.getSize()[TextLine.WIDTH] + toCompareWhitespace)
+                - toDraw.getSize()[TextLine.WIDTH]
+            )
+            / TAB_SIZE
+        )
+        tabsToAddWidth = tabsToAdd * TAB_SIZE
+
+        if tabsToAdd > 0:
+            # find the index where tabs should be added
+            tabGroupIndex = -1
+            for i in range(0, tabGroup):
+                tabGroupIndex += 1
+                while (tabGroupIndex + 1 < len(split)) and (
+                    split[tabGroupIndex + 1] == TextLine.EMPTY
+                ):
+                    tabGroupIndex += 1
+
+            split[tabGroupIndex] += tabsToAdd * TextLine.TAB
+            newText = splitter.join(split)
+            toDraw.setText(newText).setPos(
+                (
+                    toDraw.getPos()[TextLine.X] - tabsToAddWidth,
+                    toDraw.getPos()[TextLine.Y],
+                )
+            )
+        else:
+            tabsToAddWidth = 0
+
+        return tabsToAddWidth
+
+    @staticmethod
+    def delimitFFmpegPath(filepath: str) -> str:
+        """Delimit file path, in order to work within an FFmpeg command.
+
+        Args:
+            filepath (str): File path.
+
+        Returns:
+            str: Delimited file path.
         """
         return filepath.replace(":", "\\\\:")
 
     @staticmethod
-    def delimitFFmpegText(text):
-        """Delimit text, to ensure FFmpeg command runs successfully.
+    def delimitFFmpegText(text: str) -> str:
+        """Delimit text, in order to work within an FFmpeg command.
 
         Args:
-            text (str): text
+            text (str): Text to delimit.
 
         Returns:
-            str: text
+            str: Delimited text.
         """
         DELIMITER = "\\"
 
@@ -242,24 +544,86 @@ class TextLine:
         return text
 
     @staticmethod
-    def importTextLineToFFmpeg(textLine):
-        """Import TextLine into FFmpeg command.
+    def importBorder(
+        textLine: TextLine, engine: RenderEngine
+    ) -> list[str] | tuple[Coords, str]:
+        """Import border into render engine.
 
         Args:
-            textLine (TextLine): TextLine to import
+            textLine (TextLine): TextLine to import.
+            renderEngine (Engine): Engine used to draw.
 
         Returns:
-            list(str, ...): TextLine data being imported
+            list[str]: Exported border.
         """
         borderSize = textLine.getBorderSize()
         borderColor = textLine.getBorderColor()
+
+        if not borderSize:
+            raise ValueError("Border size not set.")
+
+        if not borderColor:
+            raise ValueError("Border color not set.")
+
+        x, y = textLine.getPos()
+        width, _ = textLine.getSize()
+        height = textLine.getTrueHeight()
+
+        topLeft = (
+            x - borderSize[TextLine.BORDER_LEFT],
+            y - borderSize[TextLine.BORDER_TOP],
+        )
+
+        bottomRight = (
+            x + width + borderSize[TextLine.BORDER_RIGHT],
+            y + height + borderSize[TextLine.BORDER_BOTTOM],
+        )
+
+        match engine:
+
+            case RenderEngine.FFMPEG:
+                exportedBorder = []
+
+                bW, bH = (
+                    bottomRight[TextLine.X] - topLeft[TextLine.X],
+                    bottomRight[TextLine.Y] - topLeft[TextLine.Y],
+                )
+
+                exportedBorder.extend(
+                    [
+                        topLeft[TextLine.X],
+                        topLeft[TextLine.Y],
+                        bW,
+                        bH,
+                        borderColor,
+                    ]
+                )
+                return exportedBorder
+
+            case RenderEngine.PILLOW:
+                bottomRight = bottomRight[TextLine.X] - 1, bottomRight[TextLine.Y] - 1
+                return [topLeft, bottomRight], borderColor
+
+            case _:  # default
+                raise NotImplementedError("Render Engine does not exist.")
+
+    @staticmethod
+    def importTextLineToFFmpeg(textLine: TextLine) -> list[str]:
+        """Import TextLine in to FFmpeg.
+
+        Args:
+            textLine (TextLine): TextLine to import.
+
+        Returns:
+            list[str]: Exported TextLine.
+        """
         exportedTextLine = []
 
         exportedTextLine.extend(
             [
                 TextLine.delimitFFmpegPath(textLine.getFontFile()),
                 textLine.getFontPoint(),
-                textLine.getFontColor(),
+                textLine.getColor(),
                 TextLine.delimitFFmpegText(textLine.getText()),
             ]
         )
@@ -271,63 +635,64 @@ class TextLine:
             ]
         )
 
-        if borderSize:
-            exportedTextLine.append(borderColor)
-            for size in borderSize:
-                exportedTextLine.append(size)
-
         return exportedTextLine
 
     @staticmethod
-    def getFFmpegCMD(imgName, imgPath, textLines, hasBorder, outputDir):
-        """Generate the FFmpeg command to draw the textLines onto the image file.
+    def getFFmpegCMD(
+        imgName: str,
+        imgPath: str,
+        textLines: list[TextLine],
+        hasBorder: bool,
+        outputDir: str,
+    ) -> str:
+        """Get FFmpeg command, which draws the TextLines on to the base image.
 
         Args:
-            imgName (str): filename of the image (no extension)
-            imgPath (str): path of the image
-            textLines (list[TextLine, ...]): TextLine Objects
-            hasBorder (bool): draw border if True
-            outputDir (str): output dir
+            imgName (str): Image filename (excluding file extension).
+            imgPath (str): Image file path.
+            textLines (list[TextLine]): TextLines to draw.
+            hasBorder (bool): If True, draw border.
+            outputDir (str): Output file path.
 
         Returns:
-            str: complete FFmpeg command
+            str: FFmpeg command.
         """
-        startCmd = '"'
-        drawText = "drawtext=fontfile={}:fontsize={}:fontcolor={}:text='{}':x={}:y={}"
-        appendBorder = ":boxcolor={}:box=1:boxborderw={}|{}|{}|{}"
-        appendCmd = ","
-        endCmd = '"'
+        START_CMD = '"'
+        DRAW_TEXT = "drawtext=fontfile={}:fontsize={}:fontcolor={}:text='{}':x={}:y={}"
+        DRAW_BORDER = "format=rgb24, drawbox=x={}:y={}:w={}:h={}:color={}:t=fill"
+        APPEND_CMD = ","
+        EMD_CMD = '"'
 
-        # NOTE: textline command with border must be drawn first
-        if hasBorder:
+        textLineCMDs = []
+        cmdBuilder = START_CMD
+
+        if hasBorder:  # NOTE: Border must be drawn first.
             COMPLETE = False
             i = 0
             while not COMPLETE and i < len(textLines):
                 if textLines[i].getBorderSize():
-                    textLines[i], textLines[0] = textLines[0], textLines[i]
+                    cmdBuilder += DRAW_BORDER + APPEND_CMD
+                    cmdBuilder = cmdBuilder.format(
+                        *TextLine.importBorder(textLines[i], RenderEngine.FFMPEG)
+                    )
+                    textLineCMDs.append(cmdBuilder)
+                    cmdBuilder = ""  # reset
                     COMPLETE = True
                 i += 1
 
-        textLineCMDs = []
         for i in range(0, len(textLines)):
-            cmdBuilder = ""
-            if 0 == i:
-                cmdBuilder += startCmd
-
-            cmdBuilder += drawText
-
-            if hasBorder and textLines[i].getBorderSize():
-                cmdBuilder += appendBorder
+            cmdBuilder += DRAW_TEXT
 
             if textLines[-1] is textLines[i]:
-                cmdBuilder += endCmd
+                cmdBuilder += EMD_CMD
             else:
-                cmdBuilder += appendCmd
+                cmdBuilder += APPEND_CMD
 
             cmdBuilder = cmdBuilder.format(
                 *TextLine.importTextLineToFFmpeg(textLines[i])
             )
             textLineCMDs.append(cmdBuilder)
+            cmdBuilder = ""  # reset
 
         return " ".join(
             [
@@ -345,223 +710,481 @@ class TextLine:
             ],
         )
 
-    # constructor
-    def __init__(self, text, fontFile, fontPoint, fontColor, img):
-        """Initilize TextLine object
+    @staticmethod
+    def drawTextLines(
+        imgName: str,
+        imgPath: str,
+        linesToDraw: list[TextLine],
+        hasBorder: bool,
+        outputDir: str,
+        renderEngine: RenderEngine,
+        incrementProgress: Callable | None,
+    ) -> None:
+        """Draw TextLines from a list.
 
         Args:
-            text (str): contents of the line
-            fontFile (str): path to font
-            fontPoint (int): size of font
-            fontColor (str): hex color for font
-            img (Image): text line position boundary
+            imgName (str): Image filename (excluding file extension).
+            imgPath (str): Image file path.
+            linesToDraw (list[TextLine]): TextLines to draw.
+            hasBorder (bool): If True, draw border.
+            outputDir (str): Output file path.
+            renderEngine (Engine): Engine used to draw.
+            incrementProgress (Callable | None): Function to increment progress. Defaults to None.
+
+        Raises:
+            NotImplementedError: Render engine does not exist.
+        """
+        match renderEngine:
+
+            case RenderEngine.FFMPEG:
+                subprocess.Popen(
+                    TextLine.getFFmpegCMD(
+                        imgName, imgPath, linesToDraw, hasBorder, outputDir
+                    ),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.STDOUT,
+                ).wait()
+
+            case RenderEngine.PILLOW:
+                TRANSPARENT = "#FFFFFF00"
+                RGBA = "RGBA"
+                IMG_EXT = ".png"
+                FORMAT = "PNG"
+
+                img = linesToDraw[0].getImg().convert(RGBA)
+
+                # draw border
+                if hasBorder:
+                    XY, BORDER_COLOR = 0, 1
+                    border = Image.new(RGBA, img.size, TRANSPARENT)
+                    draw = ImageDraw.Draw(border)
+
+                    exportedBorder = cast(
+                        tuple[Coords, str],
+                        TextLine.importBorder(
+                            next(line for line in linesToDraw if line.getBorderSize()),
+                            RenderEngine.PILLOW,
+                        ),
+                    )
+
+                    draw.rectangle(exportedBorder[XY], exportedBorder[BORDER_COLOR])
+                    img = Image.alpha_composite(img, border)
+
+                # draw textLines
+                textLines = Image.new(RGBA, img.size, TRANSPARENT)
+                draw = ImageDraw.Draw(textLines)
+
+                for line in linesToDraw:
+                    draw.text(
+                        line.getPos(),
+                        line.getText(),
+                        line.getColor(),
+                        line.getFont(),
+                        anchor="lt",  # left, top
+                    )
+                img = Image.alpha_composite(img, textLines)
+
+                # save result
+                os.makedirs(outputDir, exist_ok=True)
+                img.save(os.path.join(outputDir, imgName + IMG_EXT), FORMAT)
+
+            case _:  # default
+                raise NotImplementedError("Render engine does not exist.")
+
+        if incrementProgress:
+            incrementProgress()
+
+    # CONSTRUCTOR
+    def __init__(
+        self,
+        text: str,
+        fontFile: str,
+        fontPoint: int,
+        color: str,
+        img: ImageFile.ImageFile,
+    ) -> None:
+        """Initialize new TextLine.
+
+        Args:
+            text (str): Contents of the text line.
+            fontFile (str): Font file path.
+            fontPoint (int): Font size.
+            color (str): Text hex color code.
+            img (ImageFile.ImageFile): Base image, where text will be drawn.
         """
         # passed
         self.text = text
         self.fontPoint = fontPoint
         self.fontFile = fontFile
-        self.fontColor = fontColor
+        self.color = color
         self.img = img
 
         # dependent
         self.font = ImageFont.truetype(fontFile, fontPoint)
-        self.size = None
-        self.offset = None
+        self.size = cast(tuple[int, int], None)
+        self.trueHeight = cast(int, None)
+        self.offset = cast(tuple[int, int], None)
         self.setSize()
 
-        # uninitilized
-        self.position = None  # (x, y) in px
-        self.borderSize = None
-        self.borderColor = None
+        # uninitialized
+        self.position: tuple[float, float] = cast(tuple[float, float], None)
+        self.borderSize: tuple[float, float, float, float] = cast(
+            tuple[float, float, float, float], None
+        )
+        self.borderColor: str = cast(str, None)
 
-    # factory
-    @classmethod
-    def copyStyle(cls, textLine, text):
-        """Create a new TextLine with the same style.
+    # COMPARATORS
+    def __eq__(self, other: object) -> bool:
+        """Compare TextLines.
 
         Args:
-            textLine (TextLine): a TextLine Object
-            text (str): text
+            other (object): Object being compared against.
 
         Returns:
-            TextLine: a TextLine Object
+            bool: Is equal?
+        """
+        if not isinstance(other, type(self)):
+            return NotImplemented
+
+        return (
+            self.text == other.text
+            and self.fontFile == other.fontFile
+            and self.fontPoint == other.fontPoint
+            and self.color == other.color
+            # and self.img.filename == other.img.filename
+            and self.position == other.position
+            and self.borderSize == other.borderSize
+            and self.borderColor == other.borderColor
+        )
+
+    def compareStyle(self, other: object) -> bool:
+        """Compare TextLines, based solely on style.
+
+        Args:
+            other (object): Object being compared against.
+
+        Returns:
+            bool: Is style equal?
+        """
+        if not isinstance(other, type(self)):
+            return NotImplemented
+
+        return (
+            self.fontFile == other.fontFile
+            and self.fontPoint == other.fontPoint
+            and self.color == other.color
+        )
+
+    # HASH
+    def __hash__(self) -> int:
+        """Hash TextLine.
+
+        Returns:
+            int: TextLine hash.
+        """
+        return hash(
+            (
+                self.text,
+                self.fontFile,
+                self.fontPoint,
+                self.color,
+                # self.img.filename,
+                self.position,
+                self.borderSize,
+                self.borderColor,
+            )
+        )
+
+    # FACTORY METHODS
+    @classmethod
+    def copy(cls, textLine: TextLine) -> TextLine:
+        """Copy TextLine.
+
+        Args:
+            textLine (TextLine): TextLine to copy.
+
+        Returns:
+            TextLine: TextLine copy.
+        """
+        copy = cls(
+            textLine.getText(),
+            textLine.getFontFile(),
+            textLine.getFontPoint(),
+            textLine.getColor(),
+            textLine.getImg(),
+        )
+
+        if textLine.getPos():
+            copy.setPos(textLine.getPos())
+
+        if textLine.getBorderSize():
+            copy.setBorderSize(textLine.getBorderSize())
+
+        if textLine.getBorderColor():
+            copy.setBorderColor(textLine.getBorderColor())
+
+        return copy
+
+    @classmethod
+    def copyStyle(cls, textLine: TextLine, text: str) -> TextLine:
+        """Create a TextLine copy, with the same style as the original TextLine.
+
+        Args:
+            textLine (TextLine): Original TextLine.
+            text (str): New text.
+
+        Returns:
+            TextLine: TextLine copy.
         """
         return cls(
             text,
             textLine.getFontFile(),
             textLine.getFontPoint(),
-            textLine.getFontColor(),
+            textLine.getColor(),
             textLine.getImg(),
         )
 
-    # getters
-    def getText(self):
-        """Get text.
+    # GETTERS
+    def getText(self, REMOVE_DELIMITERS: bool = False) -> str:
+        """Get TextLine text.
+
+        Args:
+            REMOVE_DELIMITERS (bool, optional): Defaults to False.
 
         Returns:
-            str: text
+            str: Text.
         """
-        return self.text
+        if REMOVE_DELIMITERS:
+            cleanText = self.text
+            for delimiter in TextLine.DELIMITERS:
+                cleanText = cleanText.replace(delimiter, TextLine.EMPTY)
+            return cleanText
+        else:
+            return self.text
 
-    def getFontFile(self):
-        """Get the font file path.
+    def getFontFile(self) -> str:
+        """Get TextLine font file.
 
         Returns:
-            str: font file path
+            str: Font file path.
         """
         return self.fontFile
 
-    def getFontPoint(self):
-        """Get font point.
+    def getFontPoint(self) -> int:
+        """Get TextLine font point.
 
         Returns:
-            int: font point
+            int: Font size.
         """
         return self.fontPoint
 
-    def getFont(self):
-        """Get the TextLine font object
+    def getFont(self) -> ImageFont.FreeTypeFont:
+        """Get TextLine font.
 
         Returns:
-            FreeTypeFont: font style used for TextLine
+            ImageFont.FreeTypeFont: Font style (font and font point).
         """
         return self.font
 
-    def getPos(self):
-        """Get the TextLine position
+    def getPos(self) -> tuple[float, float]:
+        """Get TextLine position.
+
+        See also:
+            `getOffset()`
+
+        Raises:
+            TypeError: If None, position is null.
 
         Returns:
-            tuple[int, int]: (x, y) anchor point to draw TextLine
+            tuple[float, float]: (`X`, `Y`) position, where text is drawn on to the base image. Default is None (null).
         """
         return self.position
 
-    def getImg(self):
-        """Get base image
+    def getImg(self) -> ImageFile.ImageFile:
+        """Get TextLine base image.
 
         Returns:
-            Image: image text will be drawn on.
+            ImageFile.ImageFile: Base image, text is drawn on to.
         """
         return self.img
 
-    def getImgSize(self):
-        """Get image size
+    def getImgSize(self) -> tuple[int, int]:
+        """Get TextLine base image size.
 
         Returns:
-            tuple[int, int]: (width, height) in px
+            tuple[int, int]: (`WIDTH`, `HEIGHT`), in px.
         """
         return self.img.size
 
-    def getSize(self):
-        """Get the size (including kerning) of the TextLine.\n
-        See TextLine.getKerningSize() for more info.
+    def getSize(self) -> tuple[int, int]:
+        """Get the TextLine size.\n
+
+        Note:
+            Size includes kerning.
+
+        See also:
+            `TextLine.setSize()`
+
+            `TextLine.getKerningSize()`
 
         Returns:
-            tuple[int, int]: (width, height) in px
+            tuple[int, int]: (`WIDTH`, `HEIGHT`), in px.
         """
         return self.size
 
-    def getOffset(self):
-        """Get the offset needed to draw a TextLine accurately.
+    def getTrueHeight(self) -> int:
+        """Get the TextLine true height, NOT the ascent.
+
+        WARNING:
+            This includes the descender.
 
         Returns:
-            tuple[int, int]: (offset_x, offset_y) indentation from 0, 0 draw point.
+            int: True height, in px.
+        """
+        return self.trueHeight
+
+    def getOffset(self) -> tuple[int, int]:
+        """Get the TextLine offset.\n
+        Indentation from the TextLine position.
+
+        See also:
+            `getPos()`
+
+        Returns:
+            tuple[int, int]: (`OFFSET_X`, `OFFSET_Y`), in px.
         """
         return self.offset
 
-    def getBorderSize(self):
-        """Get TextLine border size. If None, then border is disabled.
+    def getBorderSize(self) -> tuple[float, float, float, float] | None:
+        """Get TextLine border size.\n
+        \nBorder widths:
+        (`BORDER_TOP`, `BORDER_RIGHT`, `BORDER_BOTTOM`, `BORDER_LEFT`)
 
-        Returns:
-            tuple[int, int, int, int]: (top, left, bottom, right) width in px
+        \nReturns:
+        \n    tuple[float, float, float, float] | None: Border widths, in px. Defaults to None (null).
         """
         return self.borderSize
 
-    def getBorderColor(self):
-        """Get the border color for the TextLine.
+    def getBorderColor(self) -> str | None:
+        """Get the TextLine border color.
 
         Returns:
-            str: hex color
+            str | None: Hex color code. Defaults to None (null).
         """
         return self.borderColor
 
-    def getFontColor(self):
-        """Get TextLine font color.
+    def getColor(self) -> str:
+        """Get the TextLine text color.
 
         Returns:
-            str: Hex color
+            str: Hex color code.
         """
-        return self.fontColor
+        return self.color
 
-    # setters
-    def setPos(self, position):
-        """Set the TextLine position
+    # SETTERS
+    def setPos(self, position: tuple[float, float]) -> TextLine:
+        """Set TextLine position, in relation to the base image.
 
         Args:
-            position (tuple[int, int]): (x, y) anchor point to draw TextLine
+            position (tuple[float, float]): (`X`, `Y`) anchor point, where text is drawn on to the base image.
 
         Raises:
-            IndexError: position is out of image bounds
+            ValueError: position invalid
+
+        Returns:
+            TextLine: Self.
         """
         if (
             0 > position[self.X] > self.img.width
             or 0 > position[self.Y] > self.img.height
         ):
-            raise IndexError
+            raise ValueError("Position invalid!")
 
         self.position = position
 
-    def setSize(self, consistentHeight=True):
-        """Sets the size (width, height) and offset (x, y) of the textLine in px.\n
-        Size must be reset every time you change an attribute of the TextLine.
+        return self
 
-        Args:
-            consistentHeight (bool, optional): Should height remain consistant(align all text onto a line). Defaults to True.
+    def setSize(self) -> TextLine:
+        """Set TextLine size (`WIDTH`, `HEIGHT`) and offset (`OFFSET_X`, `OFFSET_Y`), in px.\n
+        When a TextLine attribute is modified, `setSize()` must be rerun.
+
+        Returns:
+            TextLine: Self.
         """
-        ascent, descent = self.font.getmetrics()
+        # independent of the text contents
+        ascent, _ = self.font.getmetrics()  # ignore descent
+
+        # dependent on the text contents
         (textWidth, textHeight), (offset_x, offset_y) = self.font.font.getsize(
-            self.text
+            self.getText(True)
         )
+        textWidth += TextLine.getTabsWidth(self.font, self.getText())
 
-        if consistentHeight:
-            textHeight = ascent
-        else:
-            # The below is not equivalent to the getSize() textHeight
-            textHeight = ascent + descent
-
-        self.size = (textWidth, textHeight)
+        self.trueHeight = textHeight
+        self.size = (textWidth, ascent)
         self.offset = (offset_x, offset_y)
 
-    def setText(self, text):
-        """Change the text for the TextLine.
+        return self
+
+    def setText(self, text: str) -> TextLine:
+        """Set TextLine text.
 
         Args:
-            text (str): text
+            text (str): New text.
+
+        Returns:
+            TextLine: Self.
         """
         self.text = text
         self.setSize()
 
-    def setBorderSize(self, borderSize):
-        """Set the TextLine border size.
+        return self
+
+    def setBorderSize(
+        self, borderSize: tuple[float, float, float, float] | None
+    ) -> TextLine:
+        """Set TextLine border size.\n
+
+        Note:
+            Border widths:
+            (`BORDER_TOP`, `BORDER_RIGHT`, `BORDER_BOTTOM`, `BORDER_LEFT`)
 
         Args:
-            borderSize (tuple[int, int, int, int]): (top, left, bottom, right) width in px
+            borderSize (tuple[float, float, float, float] | None): Border widths, in px. None, means null.
+
+        Returns:
+            TextLine: Self.
         """
-        self.borderSize = borderSize
+        if borderSize:
+            self.borderSize = borderSize
 
-    def setBorderColor(self, borderColor):
-        """Set the TextLine border color.
+        return self
+
+    def setBorderColor(self, borderColor: str | None) -> TextLine:
+        """Set TextLine border color.
 
         Args:
-            borderColor (str): hex color
+            borderColor (str | None): Hex color code. None, means null.
+
+        Returns:
+            TextLine: Self.
         """
-        self.borderColor = borderColor
+        if borderColor:
+            self.borderColor = borderColor
 
-    def setFontPoint(self, fontPoint):
-        """Set the font point for the TextLine.
+        return self
+
+    def setFontPoint(self, fontPoint: int) -> TextLine:
+        """Set TextLine font point.
 
         Args:
-            fontPoint (int): font point
+            fontPoint (int): Size of text.
+
+        Returns:
+            TextLine: Self.
         """
         self.fontPoint = fontPoint
         self.font = ImageFont.truetype(self.fontFile, fontPoint)
         self.setSize()
+
+        return self

@@ -1,64 +1,62 @@
 """
 Christopher Mee
 2024-05-11
-Parse date to get extra info, i.e. day of week, 12 hr time
+Parse and convert date into new formats, such as day of week and 12-hour time.
 """
 
 import datetime
 import sys
+from typing import Dict
 
 
-def parseDate(date):
-    """Parse date to dictionary.
+def parseDate(date: str) -> Dict[str, str]:
+    """Parse date.
 
     Args:
-        date (str): YYYY-MM-DD_HHMM
+        date (str): Date, "YYYY-MM-DD_HHMM".
 
     Returns:
-        dict: dictionary containing date data
+        Dict[str, str]: Parsed date.
     """
     try:
         parsedDate = datetime.datetime.strptime(date, "%Y-%m-%d_%H%M")
+    except:
+        raise ValueError("Invalid date format. Please use the correct format: YYYY-MM-DD_HHMM.")
 
-        return dict(
-            time_12hr=parsedDate.strftime("%I:%M").upper(),
-            am_pm=parsedDate.strftime("%p").upper(),
-            date=parsedDate.strftime("%d"),
-            day_of_week_abr=parsedDate.strftime("%a").upper(),
-            month_abr=parsedDate.strftime("%b").upper(),
-            year=parsedDate.strftime("%Y"),
-        )
-    except ValueError:
-        return "INVALID DATE FORMAT. PLEASE USE FORMAT: YYYY-MM-DD_HHMM"
+    return dict(
+        time_12hr=parsedDate.strftime("%I:%M").upper(),
+        am_pm=parsedDate.strftime("%p").upper(),
+        date=parsedDate.strftime("%d"),
+        day_of_week_abr=parsedDate.strftime("%a").upper(),
+        month_abr=parsedDate.strftime("%b").upper(),
+        year=parsedDate.strftime("%Y"),
+    )
 
 
-def getFormattedDate(parsedDate):
-    """Returns the parsed date formatted specific to your needs.
+def getFormattedDate(parsedDate: Dict[str, str]) -> str:
+    """Get formatted date.
 
     Args:
-        parsedDate (dict): the result from parseDate
+        parsedDate (Dict[str, str]): Parsed date.
 
     Returns:
-        str: formatted date
+        str: Formatted date.
     """
-    tab = "    "
-
     return "\n".join(
         [
             f"{parsedDate['am_pm']}",
             f"{parsedDate['time_12hr']}",
-            f"{parsedDate['day_of_week_abr']}{tab}{parsedDate['month_abr']} {parsedDate['date']}, {parsedDate['year']}",
+            f"{parsedDate['day_of_week_abr']}",
+            f"{parsedDate['month_abr']} {parsedDate['date']}, {parsedDate['year']}",
         ]
     )
 
 
 if __name__ == "__main__":
-    # Extract date argument
     if len(sys.argv) != 2:
         print("Usage: python script.py <date>")
         sys.exit(1)
 
-    # parse date argument
     date = sys.argv[1]
     parsedDate = parseDate(date)
     print(getFormattedDate(parsedDate))
