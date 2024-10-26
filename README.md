@@ -1,5 +1,7 @@
 # timelapse
 
+[![Kofi](https://badgen.net/badge/icon/kofi?icon=kofi&label)](https://ko-fi.com/christophermee)
+
 Generate a video to view your raspberry pi timelapse.
 
 The following is a hyper detailed installation guide. Do not be intimidated.  
