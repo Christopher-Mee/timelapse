@@ -6,16 +6,15 @@ Draw a date and time overlay on images.
 == KNOWN ISSUES ===============================================================
 
 == HIGH PRIORITY ==============================================================
--Find the font size for layouts 1 and 2
-    -Debug tabs not making line longer
-
--Add setting for tab size
-
--Add size modifier, keeps font point ratio, while increases or decreases overlay size
-
--Fix arial font ex: 11 am is different than other hours.
+-Implement hidden (within bbox) kerning detection
+    Use threshold set by user
 
 == LOW PRIORITY ===============================================================
+- Add location overlay with optional timezone calculation.
+    date + location = timezone - EST or EDT
+
+- Build a GUI.
+
 -Inaccurate line composition large text inaccurate margin. ex AMPM, splitter
     ->Add index and composition to cache when using splitter.
       ->Fix border logic; Subtract TrueHeight instead of offL/Y
@@ -182,23 +181,24 @@ ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
 # == SETTINGS =================================================================
 RENDER_ENGINE: RenderEngine = RenderEngine.PILLOW
 
-# == RECOMMENDED LAYOUT SETTINGS =================
-# L1 - 2:1    -  72, 36; LEADING, MARGIN - 10, 10
-# L2 - 2:1    -  72, 36; LEADING, MARGIN - 10, 10
-# L3 - 127:30 - 127, 30; LEADING, MARGIN - 15, 10
-# ================================================
-
+# == RECOMMENDED LAYOUT SETTINGS ===
+#       LX |   T,  D
+#       ===|=========
+#       L1 |  72, 36
+#       L2 |  36, 36
+#       L3 | 127, 30
+# ===================================
 # Supported color - "#RRGGBBAA"
 
 # date, ampm str
-SMALL_FONT: str = HELVETICA_BOLD
+SMALL_FONT: str = ARIAL_BOLD
 SMALL_FONT_POINT: int = 30
-SMALL_FONT_COLOR: str = "#FF00FF80" #F0F0F0"
+SMALL_FONT_COLOR: str = "#F0F0F0"
 
 # time str
-LARGE_FONT: str = HELVETICA
+LARGE_FONT: str = ARIAL
 LARGE_FONT_POINT: int = 127
-LARGE_FONT_COLOR: str = "#FF00FF80"
+LARGE_FONT_COLOR: str = "#FFFFFF"
 
 # overlay
 LAYOUT: Overlay = Overlay.LAYOUT_3
@@ -207,12 +207,18 @@ MARGIN: float = 10
 LEADING: float = 15
 
 # border
-BORDER: bool = True
+BORDER: bool = False
 BORDER_COLOR: str = "#00000040"
 
-# modifier
+# modifiers
 LEADING_ZERO: bool = True
-STATIC_DATE: bool = False
+STATIC_DATE: bool = True
+TextLine.TAB_SIZE = 4  # in spaces
+
+# advanced
+CONVERT_TL_POS_FLOAT_TO_INT = True  # disable if render engine supports float.
+FIND_HIDDEN_KERNING = True  # disable if using 10 bit color?
+HIDDEN_KERNING_THRESHOLD = 8
 # =============================================================================
 
 # CACHE
@@ -230,9 +236,6 @@ MIN_TABS: list[tuple[TextLine, list[str], int]] = []
 IMAGES_RENDERED: int = 0
 LOCK: threading.Lock = threading.Lock()
 STOP_EVENT = threading.Event()
-
-# DEBUG
-TAB_COUNT = 0
 
 
 def search(linesToDraw: list[TextLine], mode: FindLine) -> TextLine:
@@ -631,7 +634,7 @@ def layoutTwo(linesToDraw: list[TextLine]) -> None:
         linesToDraw[i].setPos((x, y))
         baseline = y + offL - LEADING
 
-    # Extend date TextLine
+    # Extend DATE width
     if (
         linesToDraw[DATE].getSize()[TextLine.WIDTH]
         < linesToDraw[TIME].getSize()[TextLine.WIDTH]
@@ -644,18 +647,33 @@ def layoutTwo(linesToDraw: list[TextLine]) -> None:
             )
         )
 
-    # Grow time TextLine to match date width
+    # Grow TIME's font point, until TIME's width matches DATE
     (widthDif, heightDif), (offXDif, offYDif) = resizeTextLine(
         linesToDraw[TIME], linesToDraw[DATE], Resize.GROW
     )
 
-    # Reset time position
+    # Reposition TIME to account for growth
     linesToDraw[TIME].setPos(
         (
             linesToDraw[TIME].getPos()[TextLine.X] + offXDif - (widthDif / 2),
             linesToDraw[TIME].getPos()[TextLine.Y] + offYDif - heightDif,
         )
     )
+
+    # Recenter TIME by removing excess kerning
+    imgW, _ = linesToDraw[TIME].getImgSize()
+    txtW, _ = linesToDraw[TIME].getSize()
+    offX, _ = linesToDraw[TIME].getOffset()
+    excessRKern = TextLine.getKerningWidth(linesToDraw[TIME])[TextLine.KERNING_RIGHT]
+    lineCompLKern = [ord("0"), ord("1")]  # DOESN'T SUPPORT 24HR TIME
+    excessLKern = TextLine.searchMetric(
+        linesToDraw[TIME], FindMetric.SMALLEST, TextMetric.LEFT_KERNING, lineCompLKern
+    )
+    totalExcessKern = excessLKern + excessRKern
+
+    txtW = linesToDraw[TIME].getSize()[TextLine.WIDTH] - totalExcessKern
+    newX = default_x_pos() - excessLKern
+    linesToDraw[TIME].setPos((newX, linesToDraw[TIME].getPos()[TextLine.Y]))
 
 
 def layoutThree(linesToDraw: list[TextLine]) -> None:
@@ -669,6 +687,7 @@ def layoutThree(linesToDraw: list[TextLine]) -> None:
     baseline = cast(float, None)
     centerPoint = cast(float, None)
     indent = 0
+    curExRKern = 0  # calculated later, fixes unbound error
     for i in range(bottomLine, topLine, -1):
         imgW, imgH = linesToDraw[i].getImgSize()
         txtW, txtH = linesToDraw[i].getSize()
@@ -677,27 +696,32 @@ def layoutThree(linesToDraw: list[TextLine]) -> None:
 
         if DATE == i:
             # Align date to bottom right corner with a margin
-            excessRKern = TextLine.getExcessKerning(
+            curExRKern = TextLine.getExcessKerning(
                 linesToDraw[i], TextMetric.RIGHT_KERNING
             )
 
-            x = imgW + offX - txtW + excessRKern - MARGIN
+            x = imgW + offX - txtW + curExRKern - MARGIN
             y = imgH - MARGIN + offY - txtH
 
             centerPoint = offX + (txtW / 2) + MARGIN
         elif TIME == i:
-            indent = (  # add kerning offset using line composition
-                TextLine.copyStyle(linesToDraw[DATE], "0").getSize()[TextLine.WIDTH] / 2
-            )
-            excessRKern = TextLine.getExcessKerning(
+            digit = TextLine.copyStyle(linesToDraw[DATE], str(0))
+            digitWidth = digit.getSize()[TextLine.WIDTH]
+            digitExRKern = TextLine.getExcessKerning(digit, TextMetric.RIGHT_KERNING)
+            digitExLKern = TextLine.getExcessKerning(digit, TextMetric.LEFT_KERNING)
+            curExRKern = TextLine.getExcessKerning(
                 linesToDraw[i], TextMetric.RIGHT_KERNING
             )
 
-            x = imgW + offX - txtW + excessRKern - indent - MARGIN
+            # indent to the middle of the last digit in year, ignoring excess kerning
+            # (assumes all digits are equal in width, using kerning to pad L, R sides)
+            # then add the left excess kerning back to align text properly
+            indent = ((digitWidth - digitExLKern - digitExRKern) / 2) + digitExLKern
+            x = imgW + offX - txtW + curExRKern - indent - MARGIN
             y = default_y_pos()
         elif AMPM == i:
             _, ampmRKern = TextLine.getKerningWidth(linesToDraw[AMPM])
-            indent *= 0.9
+            indent *= 0.80
 
             x = imgW + offX - txtW + ampmRKern - indent - MARGIN
             y = default_y_pos()
@@ -894,7 +918,7 @@ def getStrsMaxWidth(lineStyle: TextLine, strList: list[str]) -> int:
 
 
 def minAlignmentTabs(lineStyle: TextLine, strList: list[str]) -> int:
-    """Get the minimum number of tabs needed to equally align all strings in the list.
+    """Get the minimum number of tabs needed to equally align all strings in a list.
 
     Args:
         lineStyle (TextLine): TextLine style for strings.
@@ -932,13 +956,12 @@ def combineDayDate(linesToDraw: list[TextLine]) -> TextLine:
         Output TextLine matches date style.
 
     Args:
-        dayOfWeek (TextLine): TextLine for day of week.
-        date (TextLine): TextLine for date.
+        linesToDraw (list[TextLine]): TextLines to draw.
 
     Returns:
         TextLine: Combined TextLine.
     """
-    global DAY, DATE, TAB_COUNT
+    global DAY, DATE
     date = linesToDraw[DATE]
     dayOfWeek = linesToDraw[DAY]
 
@@ -950,10 +973,6 @@ def combineDayDate(linesToDraw: list[TextLine]) -> TextLine:
     # Align day of week and combine with date
     date.setText(dayOfWeek.getText() + " " + date.getText())
     dayMinTabs = minAlignmentTabs(date, DAYS_OF_WEEK)
-    
-    dayMinTabs += TAB_COUNT  # DELETE ME *************************************************************************
-    TAB_COUNT += 1
-    
     TextLine.addTabAlignment(date, loc=1, length=dayMinTabs)
 
     del linesToDraw[DAY]
@@ -1055,6 +1074,17 @@ def regexSplit(
         text = linesToDraw[index].getText()  # reset text
 
 
+def convertPositions(linesToDraw: list[TextLine]) -> None:
+    """Convert TextLine positions to int.
+
+    Args:
+        linesToDraw (list[TextLine]): TextLines to draw.
+    """
+    for line in linesToDraw:
+        x, y = line.getPos()
+        line.setPos((round(x), round(y)))
+
+
 def removeLeadingZero(linesToDraw: list[TextLine]) -> None:
     """Remove leading zero from TextLines.
 
@@ -1131,6 +1161,9 @@ def drawOverlay(inputDir: str, filename: str, outputDir: str) -> threading.Threa
     combineDayDate(linesToDraw)
 
     setPosition(linesToDraw)
+
+    if CONVERT_TL_POS_FLOAT_TO_INT:
+        convertPositions(linesToDraw)
 
     # WARNING: TLs are split below and can no longer be modified using their indexes.
     # ===============================================================================

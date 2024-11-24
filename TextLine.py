@@ -90,12 +90,12 @@ class TextLine:
     COLON = [58]  # :
 
     # TAB HELPERS
-    TAB_SIZE = 2  # in SPACES
-    TAB = "\t"
-    REVERSE_TAB = "\r"
-    DELIMITERS = [TAB, REVERSE_TAB]  # Add all delimiters here
-    EMPTY = ""
-    SPACE = " "
+    TAB_SIZE: int = 2  # in SPACES
+    TAB: str = "\t"
+    REVERSE_TAB: str = "\r"
+    DELIMITERS: list[str] = [TAB, REVERSE_TAB]  # Add all delimiters here
+    EMPTY: str = ""
+    SPACE: str = " "
 
     # STATIC HELPERS
     @staticmethod
@@ -317,17 +317,18 @@ class TextLine:
 
     @staticmethod
     def searchMetric(
-        textLine: TextLine, mode: FindMetric, attribute: TextMetric
+        textLine: TextLine,
+        mode: FindMetric,
+        attribute: TextMetric,
+        lineComposition: list[int] | None = None,
     ) -> int:
         """Search TextLine composition metrics.
-
-        Note:
-            Used to create a text alignment anchor point and/or remove empty whitespace.
 
         Args:
             textLine (TextLine): TextLine.
             mode (FindMetric): Search mode.
             attribute (TextMetric): TextLine composition metric.
+            lineComposition (list[int] | None, optional): Specific (non-generic) line composition, otherwise one is auto-generated. Defaults to None.
 
         Returns:
             int: Result.
@@ -341,8 +342,11 @@ class TextLine:
         else:
             return NotImplemented
 
+        if lineComposition is None:
+            lineComposition = TextLine.getAsciiRange(textLine)
+
         tempLine = TextLine.copyStyle(textLine, "")
-        for char in TextLine.getAsciiRange(textLine):
+        for char in lineComposition:
             if attribute == TextMetric.X_OFFSET:
                 toCompare = tempLine.setText(chr(char)).getOffset()[TextLine.OFFSET_X]
             elif attribute == TextMetric.Y_OFFSET:
