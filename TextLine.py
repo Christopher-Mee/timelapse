@@ -89,7 +89,7 @@ class TextLine:
     COMMA = [44]  # ,
     COLON = [58]  # :
 
-    # TAB HELPERS
+    # TABS
     TAB_SIZE: int = 2  # in SPACES
     TAB: str = "\t"
     REVERSE_TAB: str = "\r"
@@ -97,7 +97,34 @@ class TextLine:
     EMPTY: str = ""
     SPACE: str = " "
 
+    # KERNING
+    FIND_HIDDEN_KERNING: bool = False
+    HIDDEN_KERNING_THRESHOLD: int = 8  # pixel opacity (0-255)
+
+    # RENDER ENGINE
+    BINARY = "1"
+    ANTI_ALIASED = "L"
+    FONT_MODE:str = ANTI_ALIASED
+
     # STATIC HELPERS
+    @staticmethod
+    def getsize(
+        text: str, font: ImageFont.FreeTypeFont
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Get size and offset for text, in px.
+
+        Args:
+            text (str): Text.
+            font (ImageFont.FreeTypeFont): Font style.
+
+        Returns:
+            tuple[tuple[int, int], tuple[int, int]]: ((`WIDTH`, `HEIGHT`), (`OFFSET_X`, `OFFSET_Y`)), in px.
+        """
+        (width, height), (xOffset, yOffset) = font.font.getsize(
+            text, TextLine.FONT_MODE, None, None, None, None
+        )
+        return (width, height), (xOffset, yOffset)
+
     @staticmethod
     def getBbox(textLine: TextLine) -> tuple[int, int, int, int]:
         """Get bounding box.\n
@@ -177,6 +204,68 @@ class TextLine:
         return bboxH - (txtH - offY)
 
     @staticmethod
+    def getHiddenKerning(
+        text: str, font: ImageFont.FreeTypeFont, threshold: int = 8
+    ) -> tuple[int, int]:
+        """Get "hidden" kerning (transparent pixels below threshold) within
+        text BBOX.
+
+        Parameters:
+            text (str): Text.
+            font (ImageFont.FreeTypeFont): Font style (font and font point).
+            threshold (int): Alpha threshold for transparency (0-255).
+
+        Returns:
+            tuple[int, int]: (`KERNING_LEFT`, `KERNING_RIGHT`), in px.
+        """
+        INDENT = int(font.size // 4)
+        PADDING = int(INDENT // 2)
+        (W, H), _ = TextLine.getsize(text, font)
+        BG_FILL = (0, 0, 0, 0)
+        TXT_FILL = (255, 255, 255, 255)
+
+        image = Image.new("RGBA", (W + INDENT, H + INDENT), BG_FILL)
+        draw = ImageDraw.Draw(image)
+        draw.fontmode = TextLine.FONT_MODE
+        draw.text((PADDING, PADDING), text, font=font, fill=TXT_FILL)
+
+        alpha = image.split()[-1]
+        bbox = alpha.getbbox()
+        if not bbox:
+            return 0, 0
+
+        l, t, r, b = bbox
+        cropped_alpha = alpha.crop((l, t, r, b))
+        width, height = cropped_alpha.size
+        middle = width // 2
+
+        def countHiddenKerning(start: int, end: int, step: int) -> int:
+            """Counts near-transparent pixels from the edge inward.
+
+            Args:
+                start (int): Start column.
+                end (int): End column.
+                step (int): Step.
+
+            Returns:
+                int: Hidden kerning count.
+            """
+            for col in range(start, end, step):
+
+                pixelCol = [cropped_alpha.getpixel((col, y)) for y in range(height)]
+                if any(
+                    isinstance(pixel, int) and pixel >= threshold for pixel in pixelCol
+                ):
+                    return abs(col - start)
+
+            return abs(end - start)
+
+        left = countHiddenKerning(0, middle, 1)  # Left to middle
+        right = countHiddenKerning(width - 1, middle - 1, -1)  # Right to middle
+
+        return left, right
+
+    @staticmethod
     def getKerningWidth(textLine: TextLine) -> tuple[int, int]:
         """Get Kerning width.
 
@@ -188,10 +277,17 @@ class TextLine:
         """
         bbox = TextLine.getBbox(textLine)
 
+        if TextLine.FIND_HIDDEN_KERNING:
+            LHK, RHK = TextLine.getHiddenKerning(
+                textLine.getText(True), textLine.getFont()
+            )
+        else:
+            LHK, RHK = 0, 0
+
         kerningLeft = bbox[TextLine.X1]
         kerningRight = textLine.getSize()[TextLine.WIDTH] - bbox[TextLine.X2]
 
-        return kerningLeft, kerningRight
+        return (kerningLeft + LHK), (kerningRight + RHK)
 
     @staticmethod
     @lru_cache(maxsize=None)
@@ -207,7 +303,7 @@ class TextLine:
         Returns:
             int: Width, in px.
         """
-        (spaceWidth, _), (_, _) = font.font.getsize(TextLine.SPACE)
+        (spaceWidth, _), _ = TextLine.getsize(TextLine.SPACE, font)
         return TextLine.TAB_SIZE * spaceWidth
 
     @staticmethod
@@ -229,7 +325,7 @@ class TextLine:
 
         split = re.split(PATTERN, text)
         for text in split[:-1]:
-            (textW, _), (_, _) = font.font.getsize(text)
+            (textW, _), _ = TextLine.getsize(text, font)
             tabOverlap = textW % TAB_WIDTH
             tabsWidthTotal += TAB_WIDTH - tabOverlap
 
@@ -777,6 +873,7 @@ class TextLine:
                 # draw textLines
                 textLines = Image.new(RGBA, img.size, TRANSPARENT)
                 draw = ImageDraw.Draw(textLines)
+                draw.fontmode = TextLine.FONT_MODE
 
                 for line in linesToDraw:
                     draw.text(
@@ -1119,8 +1216,8 @@ class TextLine:
         ascent, _ = self.font.getmetrics()  # ignore descent
 
         # dependent on the text contents
-        (textWidth, textHeight), (offset_x, offset_y) = self.font.font.getsize(
-            self.getText(True)
+        (textWidth, textHeight), (offset_x, offset_y) = TextLine.getsize(
+            self.getText(True), self.font
         )
         textWidth += TextLine.getTabsWidth(self.font, self.getText())
 

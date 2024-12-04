@@ -6,12 +6,15 @@ Draw a date and time overlay on images.
 == KNOWN ISSUES ===============================================================
 
 == HIGH PRIORITY ==============================================================
--Implement hidden (within bbox) kerning detection
-    Use threshold set by user
+- Determine how to scale overlay font point in relation to resolution.
 
 == LOW PRIORITY ===============================================================
+- Replace getsize with modern implementation.
+
 - Add location overlay with optional timezone calculation.
     date + location = timezone - EST or EDT
+
+- Add Linux support to allow for pillow-SIMD and RAQM
 
 - Build a GUI.
 
@@ -181,30 +184,39 @@ ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
 # == SETTINGS =================================================================
 RENDER_ENGINE: RenderEngine = RenderEngine.PILLOW
 
-# == RECOMMENDED LAYOUT SETTINGS ===
-#       LX |   T,  D
-#       ===|=========
-#       L1 |  72, 36
-#       L2 |  36, 36
-#       L3 | 127, 30
-# ===================================
-# Supported color - "#RRGGBBAA"
+"""
+ == RECOMMENDED LAYOUT SETTINGS ==
+ LX |   T,  D, TAB,   M,   L |
+ ===|========================|
+ L1 |  72, 36,   2,  10,  15 |
+ L2 |  36, 36,   2,  10,  15 |
+ L3 | 127, 30,   4,  10,  15 |
+ L3 | 123, 30,   7,   9,  16 |
+ === ========================
+
+ == COLOR FORMAT =================
+ "#RRGGBBAA"; (0-255) HEX
+ RED, GREEN, BLUE, ALPHA
+ MUST include '#' in color str
+ =================================
+"""
 
 # date, ampm str
 SMALL_FONT: str = ARIAL_BOLD
-SMALL_FONT_POINT: int = 30
+SMALL_FONT_POINT: int = 32
 SMALL_FONT_COLOR: str = "#F0F0F0"
 
 # time str
 LARGE_FONT: str = ARIAL
-LARGE_FONT_POINT: int = 127
+LARGE_FONT_POINT: int = 120
 LARGE_FONT_COLOR: str = "#FFFFFF"
 
 # overlay
 LAYOUT: Overlay = Overlay.LAYOUT_3
 LOCATION: Location = Location.BOTTOM_RIGHT
-MARGIN: float = 10
-LEADING: float = 15
+MARGIN: float = 9
+LEADING: float = 16
+TextLine.TAB_SIZE = 7  # in spaces
 
 # border
 BORDER: bool = False
@@ -212,13 +224,13 @@ BORDER_COLOR: str = "#00000040"
 
 # modifiers
 LEADING_ZERO: bool = True
-STATIC_DATE: bool = True
-TextLine.TAB_SIZE = 4  # in spaces
+STATIC_MONTH_POS: bool = False
 
 # advanced
-CONVERT_TL_POS_FLOAT_TO_INT = True  # disable if render engine supports float.
-FIND_HIDDEN_KERNING = True  # disable if using 10 bit color?
-HIDDEN_KERNING_THRESHOLD = 8
+CONVERT_TL_POS_FLOAT_TO_INT = True  # False; If render engine supports float values.
+TextLine.FIND_HIDDEN_KERNING = True  # False; If using 10 bit color?
+TextLine.HIDDEN_KERNING_THRESHOLD = 8  # pixel opacity (0-255)
+TextLine.FONT_MODE = TextLine.ANTI_ALIASED
 # =============================================================================
 
 # CACHE
@@ -968,7 +980,7 @@ def combineDayDate(linesToDraw: list[TextLine]) -> TextLine:
     # Align month
     date.setText((TextLine.SPACE * 2).join(date.getText().split(TextLine.SPACE, 1)))
     monthMinTabs = minAlignmentTabs(date, MONTHS)
-    TextLine.addTabAlignment(date, loc=2, length=monthMinTabs, reverse=not STATIC_DATE)
+    TextLine.addTabAlignment(date, loc=2, length=monthMinTabs, reverse=not STATIC_MONTH_POS)
 
     # Align day of week and combine with date
     date.setText(dayOfWeek.getText() + " " + date.getText())
@@ -1298,10 +1310,10 @@ if __name__ == "__main__":
         print("Usage: python " + SCRIPT_NAME + " <directory_path>")
         sys.exit(1)
 
+    START_TIME = time.time()
     inputDir = sys.argv[1]
-    start_time = time.time()  # DELETE ME
+
     applyOverlayToDir(inputDir)
-    print()  # don't overwrite progress bar
-    print(
-        "Process finished --- %s seconds ---" % (time.time() - start_time)
-    )  # DELETE ME
+
+    print()  # PROGRESS BAR HERE
+    print("Process finished --- %s seconds ---" % (time.time() - START_TIME))
