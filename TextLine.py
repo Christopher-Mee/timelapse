@@ -13,9 +13,9 @@ import subprocess  # FFmpeg
 import sys
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Callable
+from typing import Callable, cast
 
-from PIL import Image, ImageFile, ImageFont, ImageDraw
+from PIL import Image, ImageDraw, ImageFile, ImageFont
 from PIL._typing import Coords
 
 
@@ -104,7 +104,7 @@ class TextLine:
     # RENDER ENGINE
     BINARY = "1"
     ANTI_ALIASED = "L"
-    FONT_MODE:str = ANTI_ALIASED
+    FONT_MODE: str = ANTI_ALIASED
 
     # STATIC HELPERS
     @staticmethod

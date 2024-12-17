@@ -1,74 +1,86 @@
-"""
+""" 
 Christopher Mee
 2024-07-01
-Draw a date and time overlay on images.
+Draw a date and time overlay onto images.
+"""
 
-== KNOWN ISSUES ===============================================================
-
-== HIGH PRIORITY ==============================================================
-- Determine how to scale overlay font point in relation to resolution.
-
-== LOW PRIORITY ===============================================================
-- Replace getsize with modern implementation.
+""" HIGH PRIORITY ISSUES ======================================================
+- None
+"""
+""" LOW PRIORITY ISSUES =======================================================
+- Replace TextLine.getsize() with modern implementation.
 
 - Add location overlay with optional timezone calculation.
-    date + location = timezone - EST or EDT
+    date + location = timezone (EST, EDT, ...)
 
-- Add Linux support to allow for pillow-SIMD and RAQM
+- Add Linux support to allow for pillow-SIMD and RAQM layouts
 
 - Build a GUI.
 
--Inaccurate line composition large text inaccurate margin. ex AMPM, splitter
-    ->Add index and composition to cache when using splitter.
-      ->Fix border logic; Subtract TrueHeight instead of offL/Y
+- Inaccurate line compositions.
+    Ex 1: If AMPM is lower case and DATE is upper case, then AMPM will share 
+    the upper case composition of DATE, even though AMPM will never contain 
+    upper case letters. Both share the same font point and font file.
+    Ex 2: AMPM has an upper case composition ('A'-'Z'), but only uses the 
+    'A','M','P' letters causing excessive whitespace above the text.    
+    Solution: Cache TextLine index and composition during creation and 
+    when using regexSplit().
 
--If text size is too large, the descender can overlap the TextLine beneath it.
-    Solution 1: Make the leading larger, or give small text and large text 
+- If text size is too large, the descender can overlap the TextLine beneath it.
+    Solution 1: User increases leading size or give small text and large text 
     independent leading sizes.
-    Solution 2: Divide descender by leading to get a dynamic leading size. 
-    Could also do a percentage. Ex. descender is 50% overlapping the leading, 
-    push it back so its only 30% overlapping. Commas should be overlapping the 
-    leading.
+    Solution 2: Code automatically increases leading size until it no longer 
+    overlaps text below itself. Make sure it's consistent!
+    Note: Commas are supposed to overlap the leading to reduce whitespace.
 
-- If text size is too large, having a small margin will cause the descender to 
-be drawn off screen.
-    Solution: Bottom margin should be changed to follow the leading size.
+- If font point is too big, setting a small margin will cause the descender to 
+be drawn off screen. (Only when drawn in bottom right corner.)
+    Solution 1: Bottom margin should be changed to follow the leading size.
+    Solution 2: Code automatically increases bottom margin size until it no 
+    longer overlaps text below itself. Make sure it's consistent!
+"""
+""" WARNINGS ==================================================================
+- Not all fonts are supported, and if your selected font isn't displayed 
+properly, you'll notice right away. Text within the overlay may appear 
+inconsistent, “bobbing” up and down or shifting left and right. To avoid this, 
+use the `MeasurementMethodsTest.py` script to check your font file's metrics. 
+For instance, ensure that all numbers have equal width and that the x and y 
+offsets are set correctly. I encountered these issues myself when I unknowingly 
+used a bad font file, which led me to develop this font debugger script.
 
-== WARNING ====================================================================
-    1) Not all fonts are supported. If your selected font isn't being displayed 
-properly, find a different font. (FFmpeg cannot properly render certain font 
-files, resulting in text being drawn inconsistently.)
+- If you want faster rendering, use FFmpeg. FFmpeg is less accurate than 
+pillow. FFmpeg uses the same font render library as pillow, but must use 
+different font attributes internally, like height and width. FFmpeg's true 
+internal attributes can't be accessed by external programs.
 
-    2) If you want faster rendering, use FFmpeg. FFmpeg is less accurate than 
-pillow. FFmpeg uses the same font library as pillow, but must have different 
-attributes internally, like height and width. These values cant be accessed by 
-this program.
-
-    3) If you want different line composition for date and ampm, then you need 
-to change the way the cache works. Example being, setting a lower case ampm 
+- If you want different line composition for DATE and AMPM, then you need to 
+change the way the cache works. Example being, setting a lower case ampm 
 will cause the cache to return the date leading offset which is uppercase.
 
-    Line composition means taking the characters from a TextLine and checking 
-them against a range like upper, lower, and number. Then using the combined 
-range to calculate the leading offset.
-
-    Leading offset will affect leading and margin sizing.
-
-== Starter Guide for Drawing Text =============================================
+- Line composition means taking the characters from a TextLine and checking 
+them against a range like upper, lower, and number. Then taking the combined 
+range to calculate a leading offset. Currently due to generalized ranges, the 
+leading offset will affect leading and margin sizing (Not exact to user 
+settings).
+"""
+""" STARTER GUIDE FOR DRAWING MULTI-LINE TEXT =================================
     Width and height are helpful but dont tell the full story. You need to 
 indent by the x and y offsets to draw text accurately. Then you can go further 
-and use the bounding box (bbox) to remove preceding and trailing whitespace 
+and use the bounding box (BBOX) to remove preceding and trailing whitespace 
 called kerning.
-
-    To draw the next line, you need to subtract the prev offset Y from the 
-prev lines Y pos to get a new baseline. The baseline will be a consistent 
-anchor point, but leaves a large whitespace gap above the prev text line. This 
-will cause your leading to be inaccurate and look bad. My approach to solving 
-this problem, is to brute-force parse the font file to determine and minimize 
-the Y offset. And in doing so, creating a new leading offset, which minimizes 
-whitespace, while maintaining a consistent anchor point.
-
-== Diagram ====================================================================
+    To draw the next line above the previous one, first calculate the baseline, 
+which determines where the next line will be anchored. To do this, subtract the
+previous offset L from the previous Y position to get the baseline location. 
+Offset L, or the leading offset, minimizes whitespace while maintaining a 
+consistent anchor point.
+    Otherwise, if minimizing whitespace is not a priority, use the top of the 
+ascent as the baseline. To do this, subtract the previous offset Y from the 
+previous Y position to get the baseline location. This codebase uses the ascent 
+as equal to the text height, in order to maintain consistency.
+    Then, using the baseline, subtract the text height and add the text offset 
+to calculate the final Y position.
+"""
+""" DIAGRAM ===================================================================
     *
     *
     *
@@ -84,8 +96,8 @@ whitespace, while maintaining a consistent anchor point.
     BASELINE ________________
     DESCENDER
     MARGIN
-
-== Resources ==================================================================
+"""
+""" RESOURCES =================================================================
 https://ffmpeg.org/ffmpeg-filters.html#drawtext
 https://stackoverflow.com/a/68664685
 https://adamj.eu/tech/2021/07/06/python-type-hints-how-to-use-typing-cast/
@@ -102,12 +114,12 @@ import sys
 import threading
 import time
 from enum import Enum
-from typing import cast, Dict
+from typing import Dict, cast
 
 from PIL import Image
 
 import ParseDate
-from TextLine import TextLine, RenderEngine, Resize, TextMetric, FindMetric
+from TextLine import FindMetric, RenderEngine, Resize, TextLine, TextMetric
 
 
 # ENUM
@@ -182,40 +194,40 @@ ARIAL = "C:/Users/" + USERNAME + "/Desktop/arial.ttf"
 ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
 
 # == SETTINGS =================================================================
-RENDER_ENGINE: RenderEngine = RenderEngine.PILLOW
-
-"""
- == RECOMMENDED LAYOUT SETTINGS ==
- LX |   T,  D, TAB,   M,   L |
- ===|========================|
- L1 |  72, 36,   2,  10,  15 |
- L2 |  36, 36,   2,  10,  15 |
- L3 | 127, 30,   4,  10,  15 |
- L3 | 123, 30,   7,   9,  16 |
- === ========================
-
- == COLOR FORMAT =================
- "#RRGGBBAA"; (0-255) HEX
- RED, GREEN, BLUE, ALPHA
- MUST include '#' in color str
- =================================
-"""
+""" RECOMMENDED LAYOUT SETTINGS ==
+  LX |   T,  D, TAB,   M,   L |
+  ===|========================|
+  L1 |  72, 36,   2,  10,  15 |
+  L2 |  36, 36,   2,  10,  15 |
+  L3 | 127, 30,   4,  10,  15 |
+  L3 | 123, 30,   7,   9,  16 |
+===== ======================== """
+""" HEX COLOR FORMAT =============
+  #RRGGBBAA
+  RR - RED (00-FF)
+  GG - GREEN (00-FF)
+  BB - BLUE (00-FF)
+  AA - ALPHA (00-FF)
+  
+  00 = 0, FF = 255
+  MUST include the '#' symbol
+==============================="""
 
 # date, ampm str
 SMALL_FONT: str = ARIAL_BOLD
-SMALL_FONT_POINT: int = 32
+SMALL_FONT_POINT: int = 30
 SMALL_FONT_COLOR: str = "#F0F0F0"
 
 # time str
 LARGE_FONT: str = ARIAL
-LARGE_FONT_POINT: int = 120
+LARGE_FONT_POINT: int = 123
 LARGE_FONT_COLOR: str = "#FFFFFF"
 
 # overlay
 LAYOUT: Overlay = Overlay.LAYOUT_3
 LOCATION: Location = Location.BOTTOM_RIGHT
-MARGIN: float = 9
-LEADING: float = 16
+MARGIN: int = 9
+LEADING: int = 16
 TextLine.TAB_SIZE = 7  # in spaces
 
 # border
@@ -225,12 +237,14 @@ BORDER_COLOR: str = "#00000040"
 # modifiers
 LEADING_ZERO: bool = True
 STATIC_MONTH_POS: bool = False
+SCALE_OVERLAY: bool = False
 
 # advanced
-CONVERT_TL_POS_FLOAT_TO_INT = True  # False; If render engine supports float values.
-TextLine.FIND_HIDDEN_KERNING = True  # False; If using 10 bit color?
-TextLine.HIDDEN_KERNING_THRESHOLD = 8  # pixel opacity (0-255)
-TextLine.FONT_MODE = TextLine.ANTI_ALIASED
+RENDER_ENGINE: RenderEngine = RenderEngine.PILLOW
+CONVERT_TL_POS_FLOAT_TO_INT = True  # False, if render engine renders float (x,y) pos.
+TextLine.FIND_HIDDEN_KERNING = True  # False, if using 10 bit color?
+TextLine.HIDDEN_KERNING_THRESHOLD = 8  # Pixel opacity (0-255).
+TextLine.FONT_MODE = TextLine.ANTI_ALIASED  # `ANTI_ALIASED` or `BINARY` - Pillow ONLY.
 # =============================================================================
 
 # CACHE
@@ -243,11 +257,63 @@ RESIZE_RESULTS: list[
 ] = []
 SEARCH_RESULTS: Dict[FindLine, int] = {}
 MIN_TABS: list[tuple[TextLine, list[str], int]] = []
+ORIGINAL_OVERLAY_SIZES: Dict[int, int] = {}
 
 # RENDER THREADING
 IMAGES_RENDERED: int = 0
 LOCK: threading.Lock = threading.Lock()
 STOP_EVENT = threading.Event()
+
+
+def getFontScaleRatio(resolution: tuple[int, int]) -> float:
+    """Get ratio to scale font point in relation to image dimensions.
+
+    Note:
+        Ratio baseline (1.0x) is 1080p.
+
+    Args:
+        resolution (tuple[int, int]): (`WIDTH`, `HEIGHT`), in px.
+
+    Returns:
+        float: Font scale ratio. *Remember to convert result to integer*.
+    """
+    BASE_RESOLUTION = (1920, 1080)
+
+    scaleRatio = min(
+        resolution[TextLine.WIDTH] / BASE_RESOLUTION[TextLine.WIDTH],
+        resolution[TextLine.HEIGHT] / BASE_RESOLUTION[TextLine.HEIGHT],
+    )
+
+    return scaleRatio
+
+
+def scaleOverlay(fontScaleRatio: float) -> None:
+    """Scale overlay in relation to base image resolution.
+
+    See also:
+        `getFontScaleRatio()`
+
+    Args:
+        fontScaleRatio (float): Font scale ratio.
+    """
+    global SMALL_FONT_POINT, LARGE_FONT_POINT, MARGIN, LEADING
+    SMALL, LARGE, M, L = range(4)
+
+    try:  # restore
+        SMALL_FONT_POINT = ORIGINAL_OVERLAY_SIZES[SMALL]
+        LARGE_FONT_POINT = ORIGINAL_OVERLAY_SIZES[LARGE]
+        MARGIN = ORIGINAL_OVERLAY_SIZES[M]
+        LEADING = ORIGINAL_OVERLAY_SIZES[L]
+    except KeyError:  # cache
+        ORIGINAL_OVERLAY_SIZES[SMALL] = SMALL_FONT_POINT
+        ORIGINAL_OVERLAY_SIZES[LARGE] = LARGE_FONT_POINT
+        ORIGINAL_OVERLAY_SIZES[M] = MARGIN
+        ORIGINAL_OVERLAY_SIZES[L] = LEADING
+
+    SMALL_FONT_POINT = round(SMALL_FONT_POINT * fontScaleRatio)
+    LARGE_FONT_POINT = round(LARGE_FONT_POINT * fontScaleRatio)
+    MARGIN = int(MARGIN * fontScaleRatio)
+    LEADING = int(LEADING * fontScaleRatio)
 
 
 def search(linesToDraw: list[TextLine], mode: FindLine) -> TextLine:
@@ -827,7 +893,7 @@ def setBorder(linesToDraw: list[TextLine], DEBUG_MODE: bool = False) -> None:
     topAdjustedMargin = getTopAdjustedMargin(highestLine)
 
     anchorLineTop = anchorLine.getPos()[TextLine.Y]
-    anchorLineBottom = (
+    anchorLineBaseline = (
         anchorLineTop - anchorLine.getOffset()[TextLine.OFFSET_Y]
     ) + anchorLine.getSize()[TextLine.HEIGHT]
     anchorLineEnd = (
@@ -847,18 +913,18 @@ def setBorder(linesToDraw: list[TextLine], DEBUG_MODE: bool = False) -> None:
         )
 
         lowestLineTop = lowestLine.getPos()[TextLine.Y]
-        lowestLineBottom = (
+        lowestLineBaseline = (
             lowestLineTop - lowestLine.getOffset()[TextLine.OFFSET_Y]
         ) + lowestLine.getSize()[TextLine.HEIGHT]
         bottomAdjustedMargin = MARGIN - TextLine.getDescenderMinHeight(anchorLine)
 
         rightBorder = (rightmostLineEnd - anchorLineEnd) + rightAdjustedMargin
-        bottomBorder = (lowestLineBottom - anchorLineBottom) + bottomAdjustedMargin
+        bottomBorder = (lowestLineBaseline - anchorLineBaseline) + bottomAdjustedMargin
     else:  # relative to image
         imgW, imgH = anchorLine.getImgSize()
 
         rightBorder = imgW - anchorLineEnd
-        bottomBorder = imgH - anchorLineBottom
+        bottomBorder = imgH - anchorLineBaseline
 
     anchorLine.setBorderSize((topBorder, rightBorder, bottomBorder, leftBorder))
     anchorLine.setBorderColor(BORDER_COLOR)
@@ -980,7 +1046,9 @@ def combineDayDate(linesToDraw: list[TextLine]) -> TextLine:
     # Align month
     date.setText((TextLine.SPACE * 2).join(date.getText().split(TextLine.SPACE, 1)))
     monthMinTabs = minAlignmentTabs(date, MONTHS)
-    TextLine.addTabAlignment(date, loc=2, length=monthMinTabs, reverse=not STATIC_MONTH_POS)
+    TextLine.addTabAlignment(
+        date, loc=2, length=monthMinTabs, reverse=not STATIC_MONTH_POS
+    )
 
     # Align day of week and combine with date
     date.setText(dayOfWeek.getText() + " " + date.getText())
@@ -1163,6 +1231,10 @@ def drawOverlay(inputDir: str, filename: str, outputDir: str) -> threading.Threa
 
     splitDate = ParseDate.getFormattedDate(ParseDate.parseDate(imgName)).split("\n")
     AMPM, TIME, DAY, DATE = 0, 1, 2, 3
+
+    if SCALE_OVERLAY:
+        scaleOverlay(getFontScaleRatio(img.size))
+
     linesToDraw = [
         TextLine(splitDate[AMPM], SMALL_FONT, SMALL_FONT_POINT, SMALL_FONT_COLOR, img),
         TextLine(splitDate[TIME], LARGE_FONT, LARGE_FONT_POINT, LARGE_FONT_COLOR, img),
