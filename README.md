@@ -59,7 +59,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
  
  * **6) Run python script**
    * Run
-     * python DrawDateOverlayWithPython.py 'Folder path containing timelapse'
+     * python Timelapse.py 'timelapse images folder path'
    * Tip
      * Shift click folder and select copy path.
      * To run the script again you will need to copy the python.exe path from the venv folder.
