@@ -1,5 +1,4 @@
-""" 
-Christopher Mee
+""" Christopher Mee
 2024-07-01
 Draw a date and time overlay onto images.
 """
@@ -46,12 +45,11 @@ inconsistent, “bobbing” up and down or shifting left and right. To avoid thi
 use the `MeasurementMethodsTest.py` script to check your font file's metrics. 
 For instance, ensure that all numbers have equal width and that the x and y 
 offsets are set correctly. I encountered these issues myself when I unknowingly 
-used a bad font file, which led me to develop this font debugger script.
+used a bad font file, which led me to develop this debugger script for fonts.
 
-- If you want faster rendering, use FFmpeg. FFmpeg is less accurate than 
-pillow. FFmpeg uses the same font render library as pillow, but must use 
-different font attributes internally, like height and width. FFmpeg's true 
-internal attributes can't be accessed by external programs.
+- FFmpeg offers faster rendering, but it may not align text accurately due to 
+differences in text measurement methods used by Pillow and FFmpeg. Also, FFmpeg 
+will alter the color, making it different from the input image.
 
 - If you want different line composition for DATE and AMPM, then you need to 
 change the way the cache works. Example being, setting a lower case ampm 
@@ -107,6 +105,7 @@ https://github.com/python-pillow/Pillow/pull/7142
 """
 
 import glob
+import logging
 import math
 import os
 import re
@@ -119,7 +118,15 @@ from typing import Dict, cast
 from PIL import Image
 
 import ParseDate
-from TextLine import FindMetric, RenderEngine, Resize, TextLine, TextMetric
+from LoggingConfig import LoggingConfig
+from TextLine import (
+    FindMetric,
+    PillowFontMode,
+    RenderEngine,
+    Resize,
+    TextLine,
+    TextMetric,
+)
 
 
 # ENUM
@@ -162,9 +169,14 @@ class FindLine(Enum):
     RIGHTMOST = 3
 
 
-# FINAL
+# MODULE-LEVEL LOGGER
+LOGGER_NAME = os.path.splitext(os.path.basename(__file__))[0]
+logger = logging.getLogger(LOGGER_NAME)
+
+# GLOBAL
 SCRIPT_NAME: str = os.path.basename(__file__)
-USERNAME: str = os.getlogin()
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+FONTS_DIR = os.path.join(CURRENT_DIR, "fonts")
 
 # TEXTLINE INDEXES
 AMPM, TIME, DAY, DATE = range(4)
@@ -186,12 +198,13 @@ MONTHS = [
     "DEC",
 ]
 
-# == FONT =====================================================================
-HELVETICA: str = "C:/Users/" + USERNAME + "/Desktop/Helvetica___.ttf"
-HELVETICA_BOLD: str = "C:/Users/" + USERNAME + "/Desktop/HelveticaBd.ttf"
+# == FONTS ====================================================================
+HELVETICA = os.path.join(FONTS_DIR, "Helvetica___.ttf")
+HELVETICA_BOLD = os.path.join(FONTS_DIR, "HelveticaBd.ttf")
 
-ARIAL = "C:/Users/" + USERNAME + "/Desktop/arial.ttf"
-ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
+ARIAL = os.path.join(FONTS_DIR, "arial.ttf")
+ARIAL_BOLD = os.path.join(FONTS_DIR, "arialbd.ttf")
+# =============================================================================
 
 # == SETTINGS =================================================================
 """ RECOMMENDED LAYOUT SETTINGS ==
@@ -202,6 +215,7 @@ ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
   L3 | 127, 30,   4,  10,  15 |
   L3 | 123, 30,   7,   9,  16 |
 ===== ======================== """
+
 """ HEX COLOR FORMAT =============
   #RRGGBBAA
   RR - RED (00-FF)
@@ -237,15 +251,19 @@ BORDER_COLOR: str = "#00000040"
 # modifiers
 LEADING_ZERO: bool = True
 STATIC_MONTH_POS: bool = False
-SCALE_OVERLAY: bool = False
+SCALE_OVERLAY: bool = True
 
 # advanced
 RENDER_ENGINE: RenderEngine = RenderEngine.PILLOW
+TextLine.FONT_MODE = PillowFontMode.ANTI_ALIASED  # Pillow only
 CONVERT_TL_POS_FLOAT_TO_INT = True  # False, if render engine renders float (x,y) pos.
 TextLine.FIND_HIDDEN_KERNING = True  # False, if using 10 bit color?
 TextLine.HIDDEN_KERNING_THRESHOLD = 8  # Pixel opacity (0-255).
-TextLine.FONT_MODE = TextLine.ANTI_ALIASED  # `ANTI_ALIASED` or `BINARY` - Pillow ONLY.
+LOGGING: bool = False
 # =============================================================================
+
+# debug
+TextLine.LOGGING = LOGGING
 
 # CACHE
 LEADING_OFFSETS: list[tuple[TextLine, int]] = []
@@ -1334,7 +1352,7 @@ def printProgress(progress: float) -> None:
     print(f"{bar}{sign}{progStr: >{12}}", end="\r", flush=True)
 
 
-def applyOverlayToDir(inputDir: str) -> None:
+def applyOverlayToDir(inputDir: str) -> str:
     """Apply overlay to directory of images.
 
     \nNotes:
@@ -1342,6 +1360,9 @@ def applyOverlayToDir(inputDir: str) -> None:
 
     \nArgs:
         inputDir (str): Input path.
+
+    \nReturns:
+        str: Output folder path.
     """
     if not os.path.isdir(inputDir):
         raise FileNotFoundError(f"The directory '{inputDir}' does not exist.")
@@ -1369,12 +1390,15 @@ def applyOverlayToDir(inputDir: str) -> None:
                 STOP_EVENT.set()  # Stop progress thread
                 time.sleep(0.01)
                 print("Error drawing overlay: " + str(e))
+                break  # exit program
 
     for overlayRenderer in overlayRenderers:
         overlayRenderer.join()
 
     if overlayRenderers:
         threadedProgress.join()
+
+    return outputDir
 
 
 if __name__ == "__main__":
@@ -1384,6 +1408,9 @@ if __name__ == "__main__":
 
     START_TIME = time.time()
     inputDir = sys.argv[1]
+
+    if LOGGING:
+        LoggingConfig.setLogToFileConfig()
 
     applyOverlayToDir(inputDir)
 
