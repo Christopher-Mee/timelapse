@@ -4,6 +4,11 @@
 
 Generate a video to view your raspberry pi timelapse.
 
+WARNING:
+* Bad color space conversions.
+  * Image to Image - .jpg (YUV) to .png (RGB) causes color issues.
+  * Image to video - You MUST add a FFmpeg colorspace filter to the video generator for correct ouput.
+
 The following is a hyper detailed installation guide. Do not be intimidated.  
 * ‎**1) Obtain your timelapse photos**
   * Install your raspberry pi camera. (I will not include a guide.)  
