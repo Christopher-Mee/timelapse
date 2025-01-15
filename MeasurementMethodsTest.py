@@ -1,7 +1,6 @@
-"""
-Christopher Mee
-Python tool for comparing text measurement methods.
+""" Christopher Mee
 2024-07-01
+Python tool for comparing text measurement methods.
 """
 
 """ NOTES =====================================================================
@@ -19,14 +18,26 @@ from typing import Callable, cast
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# FONTS
-USERNAME = os.getlogin()
-HELVETICA = "C:/Users/" + USERNAME + "/Desktop/Helvetica___.ttf"
-HELVETICA_BOLD = "C:/Users/" + USERNAME + "/Desktop/HelveticaBd.ttf"
-ARIAL = "C:/Users/" + USERNAME + "/Desktop/arial.ttf"
-ARIAL_BOLD = "C:/Users/" + USERNAME + "/Desktop/arialbd.ttf"
+from TextLine import PillowFontMode
 
-# STRING COMPOSITIONS
+# GLOBAL
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+FONTS_DIR = os.path.join(CURRENT_DIR, "fonts")
+
+# FONTS =======================================================================
+HELVETICA = os.path.join(FONTS_DIR, "Helvetica___.ttf")
+HELVETICA_BOLD = os.path.join(FONTS_DIR, "HelveticaBd.ttf")
+
+ARIAL = os.path.join(FONTS_DIR, "arial.ttf")
+ARIAL_BOLD = os.path.join(FONTS_DIR, "arialbd.ttf")
+# =============================================================================
+
+# SETTINGS ====================================================================
+FONT_MODE: PillowFontMode = PillowFontMode.ANTI_ALIASED
+DIVIDER_SIZE = 80
+# =============================================================================
+
+# STRING ASCII COMPOSITIONS
 NUMBERS = list(range(48, (57 + 1)))
 TIME = NUMBERS + [58]
 AMPM = [65, 77, 80]
@@ -35,20 +46,42 @@ LOWERCASE = list(range((65 + 32), (90 + 32 + 1)))
 COMMA = [44]
 DATE = UPPERCASE + COMMA + NUMBERS
 
-# DIVIDER
-DIVIDER_SIZE = 80
+# FULL STRINGS
+DAY_STRS = [
+    "MON",
+    "TUE",
+    "WED",
+    "THU",
+    "FRI",
+    "SAT",
+    "SUN",
+]
+MONTH_STRS = [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+]
+AMPM_STRS = [
+    "AM",
+    "PM",
+]
+SPACE = " "
 
-# TIME
+# TIME FORMAT
 TWELVE_HOUR = "%I:%M %p"
 TWENTY_FOUR_HOUR = "%H:%M"
 
-# DATE
+# DATE FORMAT
 DAY_OF_WEEK = "%a %b %d, %Y"
-
-# PILLOW RENDER ENGINE
-BINARY = "1"
-ANTI_ALIASED = "L"
-FONT_MODE: str = ANTI_ALIASED
 
 # CACHE
 IMG_ID = 0
@@ -100,7 +133,7 @@ def measurementMethod0(text: str, points: int, fontPath: str, debug=False) -> tu
     font = ImageFont.truetype(fontPath, points)
     ascent, descent = font.getmetrics()
     (width, height), (offset_x, offset_y) = font.font.getsize(
-        text, ANTI_ALIASED, None, None, None, None
+        text, FONT_MODE.value, None, None, None, None
     )
     bbox = font.getmask(text).getbbox()
 
@@ -179,6 +212,8 @@ def getTextDimensions1(text: str, points: int, fontPath: str, debug=False) -> tu
 
 
 ###############################################################################
+
+
 def generateTimeStrs(
     start_time: str,
     end_time: str,
@@ -358,48 +393,20 @@ def customDivider(length: int, str: str | None = None) -> str:
 
 
 if __name__ == "__main__":
-    DAY_STRS = [
-        "MON",
-        "TUE",
-        "WED",
-        "THU",
-        "FRI",
-        "SAT",
-        "SUN",
-    ]
-    MONTH_STRS = [
-        "JAN",
-        "FEB",
-        "MAR",
-        "APR",
-        "MAY",
-        "JUN",
-        "JUL",
-        "AUG",
-        "SEP",
-        "OCT",
-        "NOV",
-        "DEC",
-    ]
-    AMPM_STRS = [
-        "AM",
-        "PM",
-    ]
-    SPACE = " "
-    DIVIDER = customDivider(DIVIDER_SIZE // 2)
-
-    methods = [
-        measurementMethod0,
-    ]
-    methodIndex = 0
     fontFile = ARIAL_BOLD
     fontPoint = 36
-    debug = True  # print debug info and render text image diagrams
-
-    """↓↓↓ SET MEASUREMENT TYPE HERE ↓↓↓"""
     measurementType = measure.MONTHS
+    debug = True  # log file and text diagrams
 
-    for method in methods[:]:  # To limit methods tested, use a subset here.
+    methods = [  # Add all test methods here
+        measurementMethod0,
+    ]
+    selectedIndex = 0  # Test one method, else edit slice below
+    selectedTestMethods = methods[
+        selectedIndex : selectedIndex + 1
+    ]  # methods[:] (all methods)
+
+    for method in selectedTestMethods:
         print(customDivider(DIVIDER_SIZE, method.__name__))
         match measurementType:
             case measure.CUSTOM_ASCII_RANGE:

@@ -1,5 +1,4 @@
-"""
-Christopher Mee
+""" Christopher Mee
 2024-05-11
 Parse and convert date into new formats, such as day of week and 12-hour time.
 """
@@ -21,7 +20,9 @@ def parseDate(date: str) -> Dict[str, str]:
     try:
         parsedDate = datetime.datetime.strptime(date, "%Y-%m-%d_%H%M")
     except:
-        raise ValueError("Invalid date format. Please use the correct format: YYYY-MM-DD_HHMM.")
+        raise ValueError(
+            "Invalid date format. Please use the correct format: YYYY-MM-DD_HHMM."
+        )
 
     return dict(
         time_12hr=parsedDate.strftime("%I:%M").upper(),

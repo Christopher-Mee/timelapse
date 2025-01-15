@@ -1,11 +1,11 @@
-"""
-Christopher Mee
+""" Christopher Mee
 2024-07-01
 Line of text, positioned in relation to an image.
 """
 
 from __future__ import annotations  # For forward references in type hints
 
+import logging
 import math
 import os
 import re
@@ -17,6 +17,9 @@ from typing import Callable, cast
 
 from PIL import Image, ImageDraw, ImageFile, ImageFont
 from PIL._typing import Coords
+
+# MODULE-LEVEL LOGGER
+logger = logging.getLogger(__name__)
 
 
 class RenderEngine(Enum):
@@ -61,6 +64,13 @@ class TextMetric(Enum):
     Y_OFFSET = 3
 
 
+class PillowFontMode(Enum):
+    """Pillow font mode for rendering text."""
+
+    BINARY = "1"
+    ANTI_ALIASED = "L"
+
+
 class TextLine:
     """A text line to be drawn on to an image."""
 
@@ -102,9 +112,10 @@ class TextLine:
     HIDDEN_KERNING_THRESHOLD: int = 8  # pixel opacity (0-255)
 
     # RENDER ENGINE
-    BINARY = "1"
-    ANTI_ALIASED = "L"
-    FONT_MODE: str = ANTI_ALIASED
+    FONT_MODE: PillowFontMode = PillowFontMode.ANTI_ALIASED
+
+    # DEBUG LOGGING
+    LOGGING: bool = False
 
     # STATIC HELPERS
     @staticmethod
@@ -121,7 +132,7 @@ class TextLine:
             tuple[tuple[int, int], tuple[int, int]]: ((`WIDTH`, `HEIGHT`), (`OFFSET_X`, `OFFSET_Y`)), in px.
         """
         (width, height), (xOffset, yOffset) = font.font.getsize(
-            text, TextLine.FONT_MODE, None, None, None, None
+            text, TextLine.FONT_MODE.value, None, None, None, None
         )
         return (width, height), (xOffset, yOffset)
 
@@ -226,7 +237,7 @@ class TextLine:
 
         image = Image.new("RGBA", (W + INDENT, H + INDENT), BG_FILL)
         draw = ImageDraw.Draw(image)
-        draw.fontmode = TextLine.FONT_MODE
+        draw.fontmode = TextLine.FONT_MODE.value
         draw.text((PADDING, PADDING), text, font=font, fill=TXT_FILL)
 
         alpha = image.split()[-1]
@@ -610,8 +621,12 @@ class TextLine:
         return tabsToAddWidth
 
     @staticmethod
-    def delimitFFmpegPath(filepath: str) -> str:
+    def formatPathForFFmpeg(filepath: str) -> str:
         """Delimit file path, in order to work within an FFmpeg command.
+
+        Note:
+            FFmpeg treats certain paths as strings and others as true filepaths.\n
+            Only those paths treated as strings need to be delimited.
 
         Args:
             filepath (str): File path.
@@ -619,10 +634,10 @@ class TextLine:
         Returns:
             str: Delimited file path.
         """
-        return filepath.replace(":", "\\\\:")
+        return filepath.replace("\\", "/").replace(":", "\\\\:")
 
     @staticmethod
-    def delimitFFmpegText(text: str) -> str:
+    def formatTextForFFmpeg(text: str) -> str:
         """Delimit text, in order to work within an FFmpeg command.
 
         Args:
@@ -721,10 +736,10 @@ class TextLine:
 
         exportedTextLine.extend(
             [
-                TextLine.delimitFFmpegPath(textLine.getFontFile()),
+                TextLine.formatPathForFFmpeg(textLine.getFontFile()),
                 textLine.getFontPoint(),
                 textLine.getColor(),
-                TextLine.delimitFFmpegText(textLine.getText()),
+                TextLine.formatTextForFFmpeg(textLine.getText()),
             ]
         )
 
@@ -837,10 +852,15 @@ class TextLine:
         match renderEngine:
 
             case RenderEngine.FFMPEG:
+                FFmpegCMD = TextLine.getFFmpegCMD(
+                    imgName, imgPath, linesToDraw, hasBorder, outputDir
+                )
+
+                if TextLine.LOGGING:
+                    logger.debug("Drawing TextLines - %s", FFmpegCMD)
+
                 subprocess.Popen(
-                    TextLine.getFFmpegCMD(
-                        imgName, imgPath, linesToDraw, hasBorder, outputDir
-                    ),
+                    FFmpegCMD,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                 ).wait()
@@ -873,7 +893,7 @@ class TextLine:
                 # draw textLines
                 textLines = Image.new(RGBA, img.size, TRANSPARENT)
                 draw = ImageDraw.Draw(textLines)
-                draw.fontmode = TextLine.FONT_MODE
+                draw.fontmode = TextLine.FONT_MODE.value
 
                 for line in linesToDraw:
                     draw.text(
@@ -887,7 +907,9 @@ class TextLine:
 
                 # save result
                 os.makedirs(outputDir, exist_ok=True)
-                img.save(os.path.join(outputDir, imgName + IMG_EXT), FORMAT)
+                img.convert("RGB").save(
+                    os.path.join(outputDir, imgName + IMG_EXT), FORMAT
+                )
 
             case _:  # default
                 raise NotImplementedError("Render engine does not exist.")
