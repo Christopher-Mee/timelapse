@@ -59,7 +59,7 @@ The following is a hyper detailed installation guide. Do not be intimidated.
  
  * **6) Run python script**
    * Run
-     * python Timelapse.py 'timelapse images folder path'
+     * python Timelapse.py 'path to timelapse images'
    * Tip
      * Shift click folder and select copy path.
      * To run the script again you will need to copy the python.exe path from the venv folder.
