@@ -48,7 +48,7 @@ class CropType(Enum):
 LOGGER_NAME = os.path.splitext(os.path.basename(__file__))[0]
 logger = logging.getLogger(LOGGER_NAME)
 
-# SETTINGS ====================================================================
+# RESOLUTIONS =================================================================
 DISPLAY_RES = [  # Add all resolutions here
     (3840, 2160),  # 4K UHD
     (2560, 1440),  # 1440p QHD
@@ -59,14 +59,21 @@ DISPLAY_RES = [  # Add all resolutions here
     (426, 240),  # 240p
 ]
 QHD, WHD, FHD, HD = range(4)  # Add all resolution aliases (in order) here
+# =============================================================================
+
+# SETTINGS ====================================================================
+RENDER_ENGINE = RenderEngine.FFMPEG
+
+# cropping
 CROP_POSITION: tuple[VerticalCrop, HorizontalCrop] = (
     VerticalCrop.TOP,
     HorizontalCrop.CENTER,
 )
 CROP_TYPE = CropType.ASPECT_RATIO
+
+# scaling
 DOWNSCALE: bool = True
-DOWNSCALE_RES: tuple[int, int] | None = DISPLAY_RES[FHD]  # Ex: DISPLAY_RES[FHD]
-RENDER_ENGINE = RenderEngine.PILLOW
+DOWNSCALE_RES: tuple[int, int] | None = DISPLAY_RES[FHD]
 
 # advanced
 LOGGING = False
@@ -245,7 +252,7 @@ def renderCrop(
     """
     match RENDER_ENGINE:
         case RenderEngine.PILLOW:
-            modifiedImage:Image.Image = imageFile.crop(cropBbox)
+            modifiedImage: Image.Image = imageFile.crop(cropBbox)
             if DOWNSCALE and modifiedImage.size > standardRes:
                 modifiedImage = modifiedImage.resize(
                     DOWNSCALE_RES if DOWNSCALE_RES else standardRes,
@@ -259,17 +266,31 @@ def renderCrop(
             cropX = cropBbox[LEFT]
             cropY = cropBbox[TOP]
 
+            formatFilter = ""
+            if (  # fix color shift when converting from .jpg to .png
+                os.path.splitext(imageFile.filename)[1].lower() == ".jpg"
+                and os.path.splitext(outputPath)[1].lower() == ".png"
+            ):
+                FFMPEG_PIXEL_FORMAT = "gbrp"
+                formatFilter = f"format={FFMPEG_PIXEL_FORMAT}"
+
             cropFilter = f"crop={cropWidth}:{cropHeight}:{cropX}:{cropY}"
+
             resizeFilter = ""
             if DOWNSCALE and imageFile.size > standardRes:
                 targetRes = DOWNSCALE_RES if DOWNSCALE_RES else standardRes
                 resizeFilter = f"scale={targetRes[RES_WIDTH]}:{targetRes[RES_HEIGHT]}:flags=lanczos"
 
+            # add all video filters to this list
+            videoFilters = [formatFilter, cropFilter, resizeFilter]
+
             FFmpegCMD = " ".join(
                 [
                     "ffmpeg",
                     '-i "{}"'.format(imageFile.filename),
-                    '-vf "{}"'.format(cropFilter + ", " + resizeFilter),
+                    '-vf "{}"'.format(
+                        ", ".join(filter for filter in videoFilters if filter)
+                    ),
                     "-y",
                     '"{}"'.format(outputPath),
                 ]

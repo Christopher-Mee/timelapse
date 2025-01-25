@@ -21,10 +21,12 @@ logger = logging.getLogger(LOGGER_NAME)
 # SETTINGS ====================================================================
 CROP: bool = True
 OVERLAY: bool = True
+VIDEO: bool = True
+RenderTimelapseVideo.FPS = 1
 
 # advanced
-CropImages.RENDER_ENGINE = RenderEngine.PILLOW  # RenderEngine.FFMPEG
-DrawTimelapseOverlay.RENDER_ENGINE = RenderEngine.PILLOW  # RenderEngine.FFMPEG
+CropImages.RENDER_ENGINE = RenderEngine.PILLOW
+DrawTimelapseOverlay.RENDER_ENGINE = RenderEngine.PILLOW
 RenderTimelapseVideo.RENDER_ENGINE = RenderEngine.FFMPEG
 LOGGING = False
 # =============================================================================
@@ -52,7 +54,8 @@ def createTimelapse(inputDir: str) -> None:
     if OVERLAY:
         inputDir = DrawTimelapseOverlay.applyOverlayToDir(inputDir)
 
-    RenderTimelapseVideo.convertImagesToVideo(inputDir)
+    if VIDEO:
+        RenderTimelapseVideo.convertImagesToVideo(inputDir)
 
 
 if __name__ == "__main__":

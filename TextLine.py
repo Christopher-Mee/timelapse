@@ -754,32 +754,36 @@ class TextLine:
 
     @staticmethod
     def getFFmpegCMD(
-        imgName: str,
         imgPath: str,
         textLines: list[TextLine],
         hasBorder: bool,
-        outputDir: str,
+        outputPath: str,
     ) -> str:
         """Get FFmpeg command, which draws the TextLines on to the base image.
 
         Args:
-            imgName (str): Image filename (excluding file extension).
             imgPath (str): Image file path.
             textLines (list[TextLine]): TextLines to draw.
             hasBorder (bool): If True, draw border.
-            outputDir (str): Output file path.
+            outputPath (str): Output file path.
 
         Returns:
             str: FFmpeg command.
         """
-        START_CMD = '"'
         DRAW_TEXT = "drawtext=fontfile={}:fontsize={}:fontcolor={}:text='{}':x={}:y={}"
         DRAW_BORDER = "format=rgb24, drawbox=x={}:y={}:w={}:h={}:color={}:t=fill"
         APPEND_CMD = ","
-        EMD_CMD = '"'
 
-        textLineCMDs = []
-        cmdBuilder = START_CMD
+        formatFilter = ""
+        if (  # fix color shift when converting from .jpg to .png
+            os.path.splitext(imgPath)[1].lower() == ".jpg"
+            and os.path.splitext(outputPath)[1].lower() == ".png"
+        ):
+            FFMPEG_PIXEL_FORMAT = "gbrp"
+            formatFilter = f"format={FFMPEG_PIXEL_FORMAT}"
+
+        drawFilters = []
+        cmdBuilder = ""
 
         if hasBorder:  # NOTE: Border must be drawn first.
             COMPLETE = False
@@ -790,7 +794,7 @@ class TextLine:
                     cmdBuilder = cmdBuilder.format(
                         *TextLine.importBorder(textLines[i], RenderEngine.FFMPEG)
                     )
-                    textLineCMDs.append(cmdBuilder)
+                    drawFilters.append(cmdBuilder)
                     cmdBuilder = ""  # reset
                     COMPLETE = True
                 i += 1
@@ -798,32 +802,38 @@ class TextLine:
         for i in range(0, len(textLines)):
             cmdBuilder += DRAW_TEXT
 
-            if textLines[-1] is textLines[i]:
-                cmdBuilder += EMD_CMD
-            else:
+            if not (textLines[-1] is textLines[i]):
                 cmdBuilder += APPEND_CMD
 
             cmdBuilder = cmdBuilder.format(
                 *TextLine.importTextLineToFFmpeg(textLines[i])
             )
-            textLineCMDs.append(cmdBuilder)
+            drawFilters.append(cmdBuilder)
             cmdBuilder = ""  # reset
 
-        return " ".join(
+        drawFilter = " ".join(drawFilters)
+
+        # add all video filters to this list
+        videoFilters = [formatFilter, drawFilter]
+
+        FFmpegCMD = " ".join(
             [
                 "ffmpeg",
-                "-i",
-                '"{}"'.format(imgPath),
-                "-vf",
-            ]
-            + textLineCMDs
-            + [
+                '-i "{}"'.format(imgPath),
+                '-vf "{}"'.format(
+                    ", ".join(filter for filter in videoFilters if filter)
+                ),
                 "-y",
                 "-frames:v 1",
                 "-update true",
-                '"{}"'.format(os.path.join(outputDir, f"{imgName}.png")),
-            ],
+                '"{}"'.format(outputPath),
+            ]
         )
+
+        if TextLine.LOGGING:
+            logger.debug("Drawing TextLines - %s", FFmpegCMD)
+
+        return FFmpegCMD
 
     @staticmethod
     def drawTextLines(
@@ -849,18 +859,19 @@ class TextLine:
         Raises:
             NotImplementedError: Render engine does not exist.
         """
+        IMG_EXT = ".png"
+        outputPath = os.path.join(outputDir, imgName + IMG_EXT)
+
         match renderEngine:
 
             case RenderEngine.FFMPEG:
-                FFmpegCMD = TextLine.getFFmpegCMD(
-                    imgName, imgPath, linesToDraw, hasBorder, outputDir
-                )
-
-                if TextLine.LOGGING:
-                    logger.debug("Drawing TextLines - %s", FFmpegCMD)
-
                 subprocess.Popen(
-                    FFmpegCMD,
+                    TextLine.getFFmpegCMD(
+                        imgPath,
+                        linesToDraw,
+                        hasBorder,
+                        outputPath,
+                    ),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                 ).wait()
@@ -907,9 +918,7 @@ class TextLine:
 
                 # save result
                 os.makedirs(outputDir, exist_ok=True)
-                img.convert("RGB").save(
-                    os.path.join(outputDir, imgName + IMG_EXT), FORMAT
-                )
+                img.convert("RGB").save(outputPath, FORMAT)
 
             case _:  # default
                 raise NotImplementedError("Render engine does not exist.")
